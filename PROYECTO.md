@@ -118,3 +118,41 @@ GitHub Pages reconstruye solo en ~30-60 segundos después del push.
 - Si el equipo crece o cambian roles, todo el control de permisos (quién ve qué conversación/tarea)
   está en `src/lib/api.js` y en las policies de Supabase — hoy es acceso abierto a nivel de base de
   datos (igual que el sistema viejo), el filtro de "quién ve qué" se hace en el código de la app.
+
+## 9. Modelo funcional (cómo funciona la app puertas adentro)
+
+**Equipo y roles**
+- Usuarios actuales: Brenda (rol `socia`), Evelyn, Cristina, Mia, Paulina, Virginia (rol `empleada`).
+- Cada usuario tiene: nombre, email, password (texto plano en la tabla `usuarios` — por eso el fix
+  de seguridad de la sección 4), rol, y un **color propio** (hex) que se usa para su avatar y para
+  identificar sus mensajes/tareas en toda la interfaz.
+- Diferencia de permisos por rol (se aplica en el código, no en la base de datos — la base está
+  abierta a nivel de tabla, igual que el sistema viejo):
+  - `empleada`: solo ve sus propias conversaciones y sus propias tareas (asignadas a ella o por
+    ella).
+  - `socia` (Brenda): además puede tildar "Ver todas las conversaciones del equipo" y tiene, en
+    Tareas, una tercera pestaña "Equipo" para ver las tareas de todos.
+
+**Chat (conversaciones)**
+- Conversación 1 a 1 entre dos usuarios del equipo (no hay grupos).
+- Se puede poner nombre a una conversación (por ejemplo el nombre de un cliente) para diferenciarla
+  de simplemente "hablar con fulano".
+- Se puede fijar (pin) una conversación para que quede arriba de la lista.
+- Cada mensaje puede marcarse como "Urgente" (se resalta en rojo).
+- Hay respuesta citada (reply a un mensaje puntual).
+- Hay contador de no leídos y marca de leído por usuario (`leido_por`).
+- Todo es tiempo real (Supabase Realtime): si dos personas están mirando el chat, ven los mensajes
+  nuevos sin refrescar.
+
+**Tareas**
+- Se crea una tarea con: título, descripción, a quién se la asignás, quién la asigna (uno mismo),
+  fecha de vencimiento (opcional), prioridad (Baja / Normal / Alta / Urgente), y opcionalmente
+  vinculada a una conversación puntual.
+- Estados: pendiente, en progreso, reprogramada, completada (con checkbox para marcar como hecha).
+- Se ordenan automáticamente: primero las vencidas, después por estado, después por prioridad,
+  después por fecha de vencimiento más próxima.
+- Vista "Mis tareas" (asignadas a mí) vs. "Asignadas por mí" vs. (solo para `socia`) "Equipo".
+- Hay tareas recurrentes previstas en el modelo de datos (tabla `tareas_recurrentes`: frecuencia,
+  próxima fecha, checklist) pero **todavía no tienen pantalla propia en el frontend** — quedó
+  migrado el dato del sistema viejo pero la funcionalidad de recurrencia no se re-implementó
+  todavía en la app nueva.
