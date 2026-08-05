@@ -1,4 +1,4 @@
-# Sistema de Comunicación Interna — Estudio Jurídico Alonso
+# ABOGADAS — Sistema de Comunicación Interna
 
 Este documento es el brief de continuidad del proyecto. Pegalo como primer mensaje en una sesión
 nueva de Claude Code (parado en este repo clonado) para que tenga todo el contexto sin que tengas

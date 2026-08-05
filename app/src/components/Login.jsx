@@ -37,8 +37,8 @@ export default function Login({ onLogin }) {
             background: 'var(--violeta-oscuro)', color: '#fff', display: 'flex',
             alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 20
           }}>BA</div>
-          <h1 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>Estudio Jurídico Alonso</h1>
-          <p style={{ color: 'var(--gris-texto)', fontSize: 13, marginTop: 4 }}>Sistema de comunicación interna</p>
+          <h1 style={{ fontSize: 20, fontWeight: 800, margin: 0 }}>ABOGADAS</h1>
+          <p style={{ color: 'var(--gris-texto)', fontSize: 13, marginTop: 4 }}>Sistema de Comunicación Interna</p>
         </div>
 
         <label style={{ fontSize: 13, fontWeight: 600, marginBottom: 6, display: 'block' }}>Email</label>

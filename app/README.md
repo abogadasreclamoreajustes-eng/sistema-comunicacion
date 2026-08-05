@@ -1,4 +1,4 @@
-# Sistema de Comunicación — Estudio Jurídico Alonso
+# ABOGADAS — Sistema de Comunicación Interna
 
 Chat interno + tareas para el equipo (Brenda, Evelyn, Cristina, Mia, Paulina, Virginia).
 Reemplaza el viejo sistema en Google Sheets + Apps Script (que queda intacto como backup).

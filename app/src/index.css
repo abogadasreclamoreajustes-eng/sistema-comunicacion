@@ -1,16 +1,16 @@
 @import url('https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;600;700;800&display=swap');
 
 :root {
-  --lila: #C4B5D5;
-  --lila-suave: #E8E2F0;
-  --violeta: #7B6BA0;
-  --violeta-oscuro: #564878;
-  --violeta-profundo: #2E1F52;
+  --lila: #FCE388;
+  --lila-suave: #FBF3D4;
+  --violeta: #A9791A;
+  --violeta-oscuro: #8A6D1F;
+  --violeta-profundo: #5C4813;
   --negro: #111111;
   --blanco: #FFFFFF;
-  --gris-fondo: #F5F4F7;
-  --gris-borde: #E3DEEA;
-  --gris-texto: #6B6478;
+  --gris-fondo: #FFFCF2;
+  --gris-borde: #F0E6BF;
+  --gris-texto: #746B4F;
   --rojo-urgente: #A02F2F;
   --rojo-urgente-bg: #FDECEC;
   --radio: 16px;
