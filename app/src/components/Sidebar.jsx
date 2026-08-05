@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { fmtHora } from '../lib/api'
 
 function initials(name) {
@@ -5,9 +6,19 @@ function initials(name) {
 }
 
 export default function Sidebar({
-  view, setView, conversaciones, mensajesUnread, activeConvId, setActiveConvId,
+  view, setView, conversaciones, mensajesUnread, mensajesPorConv, activeConvId, setActiveConvId,
   esSocia, verTodas, setVerTodas, onNuevaConversacion, user, onLogout
 }) {
+  const [busqueda, setBusqueda] = useState('')
+  const q = busqueda.trim().toLowerCase()
+  const conversacionesFiltradas = q
+    ? conversaciones.filter(c => (
+        (c.nombre_conv || '').toLowerCase().includes(q) ||
+        (c.otroNombre || '').toLowerCase().includes(q) ||
+        (c.ultimo_mensaje || '').toLowerCase().includes(q) ||
+        (mensajesPorConv?.[c.id] || []).some(m => (m.texto || '').toLowerCase().includes(q))
+      ))
+    : conversaciones
   return (
     <div style={{
       width: 320, background: 'var(--blanco)', borderRight: '1px solid var(--gris-borde)',
@@ -31,6 +42,10 @@ export default function Sidebar({
           <button onClick={() => setView('tareas')} className={view === 'tareas' ? 'btn-primary' : 'btn-secondary'}
             style={{ flex: 1, padding: '9px 0', fontSize: 13 }}>Tareas</button>
         </div>
+        <div style={{ marginTop: 8 }}>
+          <button onClick={() => setView('recurrentes')} className={view === 'recurrentes' ? 'btn-primary' : 'btn-secondary'}
+            style={{ width: '100%', padding: '9px 0', fontSize: 13 }}>↻ Recurrentes</button>
+        </div>
       </div>
 
       {view === 'chat' && (
@@ -48,13 +63,25 @@ export default function Sidebar({
               </label>
             </div>
           )}
+          <div style={{ padding: '0 20px 8px' }}>
+            <input
+              type="text" value={busqueda} onChange={e => setBusqueda(e.target.value)}
+              placeholder="Buscar conversación o mensaje..."
+              style={{ fontSize: 13, padding: '8px 12px' }}
+            />
+          </div>
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {conversaciones.length === 0 && (
               <div style={{ padding: 24, color: 'var(--gris-texto)', fontSize: 13, textAlign: 'center' }}>
                 No hay conversaciones todavía.
               </div>
             )}
-            {conversaciones.map(c => {
+            {conversaciones.length > 0 && conversacionesFiltradas.length === 0 && (
+              <div style={{ padding: 24, color: 'var(--gris-texto)', fontSize: 13, textAlign: 'center' }}>
+                Sin resultados para "{busqueda}".
+              </div>
+            )}
+            {conversacionesFiltradas.map(c => {
               const unread = mensajesUnread[c.id] || 0
               const active = c.id === activeConvId
               return (

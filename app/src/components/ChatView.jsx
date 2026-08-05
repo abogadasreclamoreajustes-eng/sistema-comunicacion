@@ -13,6 +13,8 @@ export default function ChatView({ conv, user, usuarios, onChanged }) {
   const [loading, setLoading] = useState(true)
   const [editingName, setEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState('')
+  const [showSearch, setShowSearch] = useState(false)
+  const [busquedaMsg, setBusquedaMsg] = useState('')
   const bottomRef = useRef(null)
 
   async function load() {
@@ -24,7 +26,7 @@ export default function ChatView({ conv, user, usuarios, onChanged }) {
     onChanged && onChanged()
   }
 
-  useEffect(() => { setLoading(true); load() }, [conv?.id])
+  useEffect(() => { setLoading(true); setShowSearch(false); setBusquedaMsg(''); load() }, [conv?.id])
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [mensajes.length])
 
@@ -50,6 +52,16 @@ export default function ChatView({ conv, user, usuarios, onChanged }) {
   const userMap = {}
   usuarios.forEach(u => { userMap[u.email] = u })
 
+  const qMsg = busquedaMsg.trim().toLowerCase()
+  const mensajesVisibles = qMsg ? mensajes.filter(m => (m.texto || '').toLowerCase().includes(qMsg)) : mensajes
+
+  function resaltar(texto) {
+    if (!qMsg) return texto
+    const idx = texto.toLowerCase().indexOf(qMsg)
+    if (idx === -1) return texto
+    return <>{texto.slice(0, idx)}<mark style={{ background: 'var(--lila-suave)', color: 'inherit', borderRadius: 3 }}>{texto.slice(idx, idx + qMsg.length)}</mark>{resaltar(texto.slice(idx + qMsg.length))}</>
+  }
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <div style={{
@@ -71,15 +83,30 @@ export default function ChatView({ conv, user, usuarios, onChanged }) {
             </div>
           )}
         </div>
+        <button onClick={() => setShowSearch(s => !s)}
+          className="btn-secondary" style={{ padding: '6px 12px', fontSize: 12 }}>
+          🔍 Buscar
+        </button>
         <button onClick={async () => { await fijarConversacion(conv.id, !conv.fijadaBool); onChanged && onChanged() }}
           className="btn-secondary" style={{ padding: '6px 12px', fontSize: 12 }}>
           {conv.fijadaBool ? '📌 Fijada' : 'Fijar'}
         </button>
       </div>
 
+      {showSearch && (
+        <div style={{ padding: '10px 24px', borderBottom: '1px solid var(--gris-borde)', background: 'var(--blanco)', display: 'flex', gap: 10, alignItems: 'center' }}>
+          <input autoFocus type="text" value={busquedaMsg} onChange={e => setBusquedaMsg(e.target.value)}
+            placeholder="Buscar en esta conversación..." style={{ fontSize: 13, padding: '8px 12px', flex: 1 }} />
+          {qMsg && <span style={{ fontSize: 12, color: 'var(--gris-texto)', whiteSpace: 'nowrap' }}>{mensajesVisibles.length} resultado{mensajesVisibles.length === 1 ? '' : 's'}</span>}
+        </div>
+      )}
+
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 10 }}>
         {loading && <div style={{ color: 'var(--gris-texto)', fontSize: 13 }}>Cargando...</div>}
-        {mensajes.map(m => {
+        {!loading && qMsg && mensajesVisibles.length === 0 && (
+          <div style={{ color: 'var(--gris-texto)', fontSize: 13, textAlign: 'center' }}>Sin resultados para "{busquedaMsg}".</div>
+        )}
+        {mensajesVisibles.map(m => {
           const mine = (m.autor || '').toLowerCase() === user.email.toLowerCase()
           const autorU = userMap[(m.autor || '').toLowerCase()] || {}
           const isUrgente = String(m.urgente).toUpperCase() === 'SI'
@@ -101,7 +128,7 @@ export default function ChatView({ conv, user, usuarios, onChanged }) {
                     fontSize: 12, opacity: .8
                   }}>{replied.texto?.slice(0, 80)}</div>
                 )}
-                <div style={{ fontSize: 14, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.texto}</div>
+                <div style={{ fontSize: 14, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{resaltar(m.texto)}</div>
                 <div style={{ fontSize: 10, opacity: .7, marginTop: 4, textAlign: 'right' }}>{fmtHora(m.fecha)}</div>
               </div>
               <button onClick={() => setReplyTo(m)} style={{

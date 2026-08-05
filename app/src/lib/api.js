@@ -222,3 +222,134 @@ export async function actualizarTarea(tareaId, campos) {
   const { error } = await supabase.from('tareas').update(campos).eq('id', tareaId)
   if (error) throw error
 }
+
+// ─── Tareas recurrentes ──────────────────────────────────
+function fmtDDMMYYYY(d) {
+  return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`
+}
+function fmtISODate(d) {
+  return d.toISOString().substring(0, 10)
+}
+
+// "YYYY-MM-DD" (de un <input type=date>) parseado en hora LOCAL, no UTC — new Date(str) con ese
+// formato lo toma como UTC medianoche y en timezones negativos (Argentina) resta un día.
+function parseLocalDateInput(s) {
+  const [y, m, d] = s.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+
+function calcularProximaFecha(tipoFrecuencia, frecuenciaConfig, desde) {
+  const d = new Date(desde)
+  d.setHours(0, 0, 0, 0)
+  if (tipoFrecuencia === 'diaria') {
+    d.setDate(d.getDate() + 1)
+    return d
+  }
+  if (tipoFrecuencia === 'semanal') {
+    const dias = (frecuenciaConfig?.diasSemana || []).slice().sort((a, b) => a - b)
+    if (dias.length === 0) { d.setDate(d.getDate() + 7); return d }
+    for (let i = 1; i <= 7; i++) {
+      const cand = new Date(d)
+      cand.setDate(cand.getDate() + i)
+      if (dias.includes(cand.getDay())) return cand
+    }
+    d.setDate(d.getDate() + 7)
+    return d
+  }
+  if (tipoFrecuencia === 'mensual') {
+    const diaMes = frecuenciaConfig?.diaMes || d.getDate()
+    const next = new Date(d.getFullYear(), d.getMonth() + 1, 1)
+    const ultimoDiaMes = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()
+    next.setDate(Math.min(diaMes, ultimoDiaMes))
+    return next
+  }
+  d.setDate(d.getDate() + 1)
+  return d
+}
+
+export async function getTareasRecurrentes(userEmail, modo, esSocia) {
+  const email = userEmail.toLowerCase().trim()
+  const { data, error } = await supabase.from('tareas_recurrentes').select('*')
+  if (error) throw error
+  let modoEfectivo = 'propias'
+  if (esSocia && modo === 'ajenas') modoEfectivo = modo
+  const filtered = data.filter(t => {
+    const asignadoA = (t.asignado_a || '').toLowerCase().trim()
+    const asignadoPor = (t.asignado_por || '').toLowerCase().trim()
+    if (modoEfectivo === 'ajenas') return true
+    return asignadoA === email || asignadoPor === email
+  })
+  return filtered.map(t => ({
+    ...t,
+    activaBool: String(t.activa || '').toUpperCase() === 'SI',
+    frecuenciaConfigObj: (() => { try { return JSON.parse(t.frecuencia_config || '{}') } catch { return {} } })()
+  })).sort((a, b) => (parseFlexibleDate(a.proxima_fecha)?.getTime() || 0) - (parseFlexibleDate(b.proxima_fecha)?.getTime() || 0))
+}
+
+export async function crearTareaRecurrente({ titulo, descripcion, asignadoPor, asignadoA, fechaInicio, fechaFin, tipoFrecuencia, frecuenciaConfig, horaSugerida, prioridad, recordatorioDias }) {
+  const id = newId()
+  const now = new Date().toISOString()
+  const inicio = fechaInicio ? parseLocalDateInput(fechaInicio) : new Date()
+  const { error } = await supabase.from('tareas_recurrentes').insert({
+    id, titulo, descripcion: descripcion || '',
+    asignado_por: asignadoPor.toLowerCase().trim(), asignado_a: asignadoA.toLowerCase().trim(),
+    fecha_inicio: fmtDDMMYYYY(inicio) + ' 00:00:00', fecha_fin: fechaFin || null,
+    tipo_frecuencia: tipoFrecuencia, frecuencia_config: JSON.stringify(frecuenciaConfig || {}),
+    hora_sugerida: horaSugerida || null, prioridad: prioridad || 'Normal',
+    recordatorio_dias: recordatorioDias ?? 0, checklist: '[]', activa: 'SI',
+    proxima_fecha: fmtDDMMYYYY(inicio), ultima_generacion: null, fecha_creacion: now
+  })
+  if (error) throw error
+  return { ok: true, id }
+}
+
+export async function actualizarTareaRecurrente(id, campos) {
+  const { error } = await supabase.from('tareas_recurrentes').update(campos).eq('id', id)
+  if (error) throw error
+}
+
+export async function eliminarTareaRecurrente(id) {
+  const { error } = await supabase.from('tareas_recurrentes').delete().eq('id', id)
+  if (error) throw error
+}
+
+// Revisa las plantillas activas vencidas y genera las tareas del día. Se llama al cargar la
+// app (no hay cron/servidor propio); es seguro que corra desde varias sesiones a la vez porque
+// chequea ultima_generacion antes de generar cada una.
+export async function generarTareasRecurrentesPendientes() {
+  const { data, error } = await supabase.from('tareas_recurrentes').select('*').eq('activa', 'SI')
+  if (error) throw error
+  const hoy = new Date()
+  hoy.setHours(0, 0, 0, 0)
+  const hoyISO = fmtISODate(hoy)
+  for (const t of data) {
+    if (t.ultima_generacion === hoyISO) continue
+    const proxima = parseFlexibleDate(t.proxima_fecha)
+    if (!proxima || proxima.getTime() > hoy.getTime()) continue
+    if (t.fecha_fin && parseFlexibleDate(t.fecha_fin) && parseFlexibleDate(t.fecha_fin).getTime() < hoy.getTime()) {
+      await actualizarTareaRecurrente(t.id, { activa: 'NO' })
+      continue
+    }
+
+    // Varias pestañas/computadoras pueden correr esto a la vez: "reclamamos" la generación de
+    // hoy con un UPDATE condicional (atómico en Postgres). Si otra sesión ya lo reclamó primero,
+    // este UPDATE no afecta ninguna fila y no generamos la tarea duplicada.
+    const { data: claimed, error: claimErr } = await supabase.from('tareas_recurrentes')
+      .update({ ultima_generacion: hoyISO })
+      .eq('id', t.id)
+      .or(`ultima_generacion.is.null,ultima_generacion.neq.${hoyISO}`)
+      .select('id')
+    if (claimErr) throw claimErr
+    if (!claimed || claimed.length === 0) continue
+
+    await crearTarea({
+      titulo: t.titulo, descripcion: t.descripcion, asignadoPor: t.asignado_por, asignadoA: t.asignado_a,
+      fechaVenc: null, prioridad: t.prioridad,
+      notas: `Generada automáticamente desde tarea recurrente "${t.titulo}".`
+    })
+    let config = {}
+    try { config = JSON.parse(t.frecuencia_config || '{}') } catch {}
+    const proximaNueva = calcularProximaFecha(t.tipo_frecuencia, config, proxima)
+    await actualizarTareaRecurrente(t.id, { proxima_fecha: fmtDDMMYYYY(proximaNueva) })
+  }
+}

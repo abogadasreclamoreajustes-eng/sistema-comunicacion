@@ -9,6 +9,10 @@ export default function TasksView({ user, usuarios, esSocia }) {
   const [tareas, setTareas] = useState([])
   const [showForm, setShowForm] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [filtroPersona, setFiltroPersona] = useState('')
+  const [filtroPrioridad, setFiltroPrioridad] = useState('')
+  const [soloVencidas, setSoloVencidas] = useState(false)
+  const [busqueda, setBusqueda] = useState('')
 
   async function load() {
     setLoading(true)
@@ -27,6 +31,15 @@ export default function TasksView({ user, usuarios, esSocia }) {
   const userMap = {}
   usuarios.forEach(u => { userMap[u.email] = u })
 
+  const q = busqueda.trim().toLowerCase()
+  const tareasFiltradas = tareas.filter(t => {
+    if (filtroPersona && t.asignado_a !== filtroPersona) return false
+    if (filtroPrioridad && t.prioridad !== filtroPrioridad) return false
+    if (soloVencidas && !t.vencida) return false
+    if (q && !(t.titulo || '').toLowerCase().includes(q) && !(t.descripcion || '').toLowerCase().includes(q)) return false
+    return true
+  })
+
   return (
     <div style={{ flex: 1, height: '100vh', overflowY: 'auto', padding: '28px 36px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
@@ -42,11 +55,33 @@ export default function TasksView({ user, usuarios, esSocia }) {
         </>}
       </div>
 
+      <div style={{ display: 'flex', gap: 10, marginBottom: 18, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input
+          type="text" value={busqueda} onChange={e => setBusqueda(e.target.value)}
+          placeholder="Buscar por título o descripción..." style={{ fontSize: 13, padding: '8px 12px', width: 220 }}
+        />
+        {esSocia && modo === 'ajenas' && (
+          <select value={filtroPersona} onChange={e => setFiltroPersona(e.target.value)} style={{ fontSize: 13, padding: '8px 10px', width: 'auto' }}>
+            <option value="">Todas las personas</option>
+            {usuarios.map(u => <option key={u.email} value={u.email}>{u.nombre}</option>)}
+          </select>
+        )}
+        <select value={filtroPrioridad} onChange={e => setFiltroPrioridad(e.target.value)} style={{ fontSize: 13, padding: '8px 10px', width: 'auto' }}>
+          <option value="">Toda prioridad</option>
+          {PRIORIDADES.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <label style={{ fontSize: 13, color: 'var(--gris-texto)', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <input type="checkbox" checked={soloVencidas} onChange={e => setSoloVencidas(e.target.checked)} style={{ width: 'auto' }} />
+          Solo vencidas
+        </label>
+      </div>
+
       {loading && <div style={{ color: 'var(--gris-texto)' }}>Cargando...</div>}
       {!loading && tareas.length === 0 && <div style={{ color: 'var(--gris-texto)' }}>No hay tareas acá.</div>}
+      {!loading && tareas.length > 0 && tareasFiltradas.length === 0 && <div style={{ color: 'var(--gris-texto)' }}>Ninguna tarea coincide con el filtro.</div>}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {tareas.map(t => {
+        {tareasFiltradas.map(t => {
           const asignadoAU = userMap[t.asignado_a] || {}
           const asignadoPorU = userMap[t.asignado_por] || {}
           const completada = t.estado === 'completada'
