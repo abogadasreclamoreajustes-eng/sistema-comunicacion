@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { supabase } from '../lib/supabase'
 import { getMensajes, enviarMensaje, marcarMensajesLeidos, fmtHora, fijarConversacion, renombrarConversacion } from '../lib/api'
 
 function initials(name) {
@@ -27,6 +28,21 @@ export default function ChatView({ conv, user, usuarios, onChanged }) {
   }
 
   useEffect(() => { setLoading(true); setShowSearch(false); setBusquedaMsg(''); load() }, [conv?.id])
+
+  // Tiempo real: si llega un mensaje nuevo o cambia el estado de "leído" (propio o de la otra
+  // persona) mientras la conversación está abierta, se refleja sin tener que salir y volver a entrar.
+  useEffect(() => {
+    if (!conv) return
+    const channel = supabase.channel(`chat-${conv.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mensajes_conv', filter: `conv_id=eq.${conv.id}` }, async () => {
+        const msgs = await getMensajes(conv.id)
+        setMensajes(msgs)
+        await marcarMensajesLeidos(conv.id, user.email)
+        onChanged && onChanged()
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [conv?.id])
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [mensajes.length])
 
@@ -111,6 +127,8 @@ export default function ChatView({ conv, user, usuarios, onChanged }) {
           const autorU = userMap[(m.autor || '').toLowerCase()] || {}
           const isUrgente = String(m.urgente).toUpperCase() === 'SI'
           const replied = m.reply_to_id ? byId[m.reply_to_id] : null
+          const leidoPorOtro = mine && conv.otroEmail &&
+            String(m.leido_por || '').toLowerCase().split(',').map(x => x.trim()).includes(conv.otroEmail.toLowerCase())
           return (
             <div key={m.id} style={{ display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start' }}>
               <div style={{
@@ -129,7 +147,17 @@ export default function ChatView({ conv, user, usuarios, onChanged }) {
                   }}>{replied.texto?.slice(0, 80)}</div>
                 )}
                 <div style={{ fontSize: 14, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{resaltar(m.texto)}</div>
-                <div style={{ fontSize: 10, opacity: .7, marginTop: 4, textAlign: 'right' }}>{fmtHora(m.fecha)}</div>
+                <div style={{
+                  fontSize: 10, marginTop: 4, textAlign: 'right', display: 'flex', justifyContent: 'flex-end',
+                  alignItems: 'center', gap: 4
+                }}>
+                  <span style={{ opacity: .7 }}>{fmtHora(m.fecha)}</span>
+                  {mine && (
+                    <span style={{ opacity: leidoPorOtro ? 1 : .7, fontWeight: leidoPorOtro ? 700 : 400 }}>
+                      {leidoPorOtro ? '✓✓ Leído' : '✓ Enviado'}
+                    </span>
+                  )}
+                </div>
               </div>
               <button onClick={() => setReplyTo(m)} style={{
                 background: 'none', border: 'none', fontSize: 11, color: 'var(--gris-texto)', padding: '2px 4px', fontWeight: 400
