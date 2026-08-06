@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { getMensajes, enviarMensaje, marcarMensajesLeidos, fmtHora, fijarConversacion, renombrarConversacion } from '../lib/api'
+import { getMensajes, enviarMensaje, eliminarMensaje, marcarMensajesLeidos, fmtHora, fijarConversacion, renombrarConversacion } from '../lib/api'
 
 function initials(name) {
   return (name || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase()
@@ -69,7 +69,15 @@ export default function ChatView({ conv, user, usuarios, onChanged }) {
   usuarios.forEach(u => { userMap[u.email] = u })
 
   const qMsg = busquedaMsg.trim().toLowerCase()
-  const mensajesVisibles = qMsg ? mensajes.filter(m => (m.texto || '').toLowerCase().includes(qMsg)) : mensajes
+  const mensajesVisibles = qMsg
+    ? mensajes.filter(m => m.eliminado !== 'SI' && (m.texto || '').toLowerCase().includes(qMsg))
+    : mensajes
+
+  async function handleEliminar(m) {
+    if (!confirm('¿Eliminar este mensaje? Va a quedar como "Mensaje eliminado" para vos y para la otra persona.')) return
+    await eliminarMensaje(m.id)
+    await load()
+  }
 
   function resaltar(texto) {
     if (!qMsg) return texto
@@ -129,39 +137,55 @@ export default function ChatView({ conv, user, usuarios, onChanged }) {
           const replied = m.reply_to_id ? byId[m.reply_to_id] : null
           const leidoPorOtro = mine && conv.otroEmail &&
             String(m.leido_por || '').toLowerCase().split(',').map(x => x.trim()).includes(conv.otroEmail.toLowerCase())
+          const eliminado = m.eliminado === 'SI'
           return (
             <div key={m.id} style={{ display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start' }}>
               <div style={{
-                maxWidth: '62%', background: mine ? 'var(--violeta-oscuro)' : 'var(--blanco)',
+                maxWidth: '62%', background: eliminado ? 'transparent' : (mine ? 'var(--violeta-oscuro)' : 'var(--blanco)'),
                 color: mine ? '#fff' : 'var(--negro)', padding: '10px 14px', borderRadius: 14,
-                border: mine ? 'none' : '1px solid var(--gris-borde)',
+                border: eliminado ? '1px dashed var(--gris-borde)' : (mine ? 'none' : '1px solid var(--gris-borde)'),
                 borderBottomRightRadius: mine ? 4 : 14, borderBottomLeftRadius: mine ? 14 : 4,
-                boxShadow: '0 2px 6px rgba(46,31,82,.05)'
+                boxShadow: eliminado ? 'none' : '0 2px 6px rgba(46,31,82,.05)'
               }}>
-                {!mine && <div style={{ fontSize: 11, fontWeight: 700, color: autorU.color || 'var(--violeta)', marginBottom: 2 }}>{autorU.nombre || m.autor}</div>}
-                {isUrgente && <div style={{ fontSize: 10, fontWeight: 800, color: mine ? '#FFD9D9' : 'var(--rojo-urgente)', marginBottom: 3 }}>🚨 URGENTE</div>}
-                {replied && (
-                  <div style={{
-                    borderLeft: '3px solid ' + (mine ? 'rgba(255,255,255,.5)' : 'var(--violeta)'), paddingLeft: 8, marginBottom: 6,
-                    fontSize: 12, opacity: .8
-                  }}>{replied.texto?.slice(0, 80)}</div>
+                {!mine && !eliminado && <div style={{ fontSize: 11, fontWeight: 700, color: autorU.color || 'var(--violeta)', marginBottom: 2 }}>{autorU.nombre || m.autor}</div>}
+                {eliminado ? (
+                  <div style={{ fontSize: 13, fontStyle: 'italic', color: 'var(--gris-texto)' }}>Mensaje eliminado</div>
+                ) : (
+                  <>
+                    {isUrgente && <div style={{ fontSize: 10, fontWeight: 800, color: mine ? '#FFD9D9' : 'var(--rojo-urgente)', marginBottom: 3 }}>🚨 URGENTE</div>}
+                    {replied && (
+                      <div style={{
+                        borderLeft: '3px solid ' + (mine ? 'rgba(255,255,255,.5)' : 'var(--violeta)'), paddingLeft: 8, marginBottom: 6,
+                        fontSize: 12, opacity: .8
+                      }}>{replied.eliminado === 'SI' ? 'Mensaje eliminado' : replied.texto?.slice(0, 80)}</div>
+                    )}
+                    <div style={{ fontSize: 14, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{resaltar(m.texto)}</div>
+                  </>
                 )}
-                <div style={{ fontSize: 14, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{resaltar(m.texto)}</div>
                 <div style={{
                   fontSize: 10, marginTop: 4, textAlign: 'right', display: 'flex', justifyContent: 'flex-end',
-                  alignItems: 'center', gap: 4
+                  alignItems: 'center', gap: 4, opacity: eliminado ? .6 : 1
                 }}>
                   <span style={{ opacity: .7 }}>{fmtHora(m.fecha)}</span>
-                  {mine && (
+                  {mine && !eliminado && (
                     <span style={{ opacity: leidoPorOtro ? 1 : .7, fontWeight: leidoPorOtro ? 700 : 400 }}>
                       {leidoPorOtro ? '✓✓ Leído' : '✓ Enviado'}
                     </span>
                   )}
                 </div>
               </div>
-              <button onClick={() => setReplyTo(m)} style={{
-                background: 'none', border: 'none', fontSize: 11, color: 'var(--gris-texto)', padding: '2px 4px', fontWeight: 400
-              }}>Responder</button>
+              {!eliminado && (
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button onClick={() => setReplyTo(m)} style={{
+                    background: 'none', border: 'none', fontSize: 11, color: 'var(--gris-texto)', padding: '2px 4px', fontWeight: 400
+                  }}>Responder</button>
+                  {mine && (
+                    <button onClick={() => handleEliminar(m)} style={{
+                      background: 'none', border: 'none', fontSize: 11, color: 'var(--gris-texto)', padding: '2px 4px', fontWeight: 400
+                    }}>Eliminar</button>
+                  )}
+                </div>
+              )}
             </div>
           )
         })}

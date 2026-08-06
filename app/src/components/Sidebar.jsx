@@ -16,7 +16,7 @@ export default function Sidebar({
         (c.nombre_conv || '').toLowerCase().includes(q) ||
         (c.otroNombre || '').toLowerCase().includes(q) ||
         (c.ultimo_mensaje || '').toLowerCase().includes(q) ||
-        (mensajesPorConv?.[c.id] || []).some(m => (m.texto || '').toLowerCase().includes(q))
+        (mensajesPorConv?.[c.id] || []).some(m => m.eliminado !== 'SI' && (m.texto || '').toLowerCase().includes(q))
       ))
     : conversaciones
   return (

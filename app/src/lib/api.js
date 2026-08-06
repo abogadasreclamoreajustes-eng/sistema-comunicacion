@@ -142,6 +142,11 @@ export async function enviarMensaje(convId, autorEmail, texto, urgente, replyToI
   return { ok: true, id }
 }
 
+export async function eliminarMensaje(mensajeId) {
+  const { error } = await supabase.from('mensajes_conv').update({ eliminado: 'SI' }).eq('id', mensajeId)
+  if (error) throw error
+}
+
 export async function marcarMensajesLeidos(convId, userEmail) {
   const email = userEmail.toLowerCase().trim()
   const { data, error } = await supabase.from('mensajes_conv').select('id,leido_por,autor').eq('conv_id', convId)
