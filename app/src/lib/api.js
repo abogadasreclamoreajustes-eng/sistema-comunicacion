@@ -32,6 +32,18 @@ export function fmtHora(s) {
   return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
 }
 
+// "Hoy" / "Ayer" / "5 de agosto de 2026" — para separadores de fecha en el chat.
+export function fmtFechaCorta(s) {
+  const d = parseFlexibleDate(s)
+  if (!d) return ''
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
+  const ayer = new Date(hoy); ayer.setDate(ayer.getDate() - 1)
+  const dd = new Date(d); dd.setHours(0, 0, 0, 0)
+  if (dd.getTime() === hoy.getTime()) return 'Hoy'
+  if (dd.getTime() === ayer.getTime()) return 'Ayer'
+  return d.toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' })
+}
+
 // ─── Auth ────────────────────────────────────────────────
 export async function login(email, password) {
   const { data, error } = await supabase.rpc('login_usuario', {

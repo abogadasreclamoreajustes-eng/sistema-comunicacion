@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { getMensajes, enviarMensaje, eliminarMensaje, marcarMensajesLeidos, fmtHora, fijarConversacion, renombrarConversacion } from '../lib/api'
+import { getMensajes, enviarMensaje, eliminarMensaje, marcarMensajesLeidos, fmtHora, fmtFechaCorta, parseFlexibleDate, fijarConversacion, renombrarConversacion } from '../lib/api'
 
 function initials(name) {
   return (name || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase()
@@ -130,7 +130,7 @@ export default function ChatView({ conv, user, usuarios, onChanged }) {
         {!loading && qMsg && mensajesVisibles.length === 0 && (
           <div style={{ color: 'var(--gris-texto)', fontSize: 13, textAlign: 'center' }}>Sin resultados para "{busquedaMsg}".</div>
         )}
-        {mensajesVisibles.map(m => {
+        {(() => { let lastDayKey = null; return mensajesVisibles.map(m => {
           const mine = (m.autor || '').toLowerCase() === user.email.toLowerCase()
           const autorU = userMap[(m.autor || '').toLowerCase()] || {}
           const isUrgente = String(m.urgente).toUpperCase() === 'SI'
@@ -138,8 +138,21 @@ export default function ChatView({ conv, user, usuarios, onChanged }) {
           const leidoPorOtro = mine && conv.otroEmail &&
             String(m.leido_por || '').toLowerCase().split(',').map(x => x.trim()).includes(conv.otroEmail.toLowerCase())
           const eliminado = m.eliminado === 'SI'
+          const fechaMsg = parseFlexibleDate(m.fecha)
+          const dayKey = fechaMsg ? fechaMsg.toDateString() : null
+          const mostrarDivisor = dayKey !== lastDayKey
+          lastDayKey = dayKey
           return (
-            <div key={m.id} style={{ display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start' }}>
+            <div key={m.id} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {mostrarDivisor && (
+              <div style={{ display: 'flex', justifyContent: 'center', margin: '4px 0' }}>
+                <span style={{
+                  fontSize: 11, fontWeight: 700, color: 'var(--gris-texto)', background: 'var(--lila-suave)',
+                  padding: '4px 12px', borderRadius: 999
+                }}>{fmtFechaCorta(m.fecha)}</span>
+              </div>
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start' }}>
               <div style={{
                 maxWidth: '62%', background: eliminado ? 'transparent' : (mine ? 'var(--violeta-oscuro)' : 'var(--blanco)'),
                 color: mine ? '#fff' : 'var(--negro)', padding: '10px 14px', borderRadius: 14,
@@ -187,8 +200,9 @@ export default function ChatView({ conv, user, usuarios, onChanged }) {
                 </div>
               )}
             </div>
+            </div>
           )
-        })}
+        }) })()}
         <div ref={bottomRef} />
       </div>
 
