@@ -95,6 +95,18 @@ export default function App() {
           }
         }
       })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'tarea_comentarios' }, async (payload) => {
+        const c = payload.new
+        const autor = (c.autor || '').toLowerCase().trim()
+        if (autor === email) return
+        const { data: t } = await supabase.from('tareas').select('asignado_a,asignado_por,titulo').eq('id', c.tarea_id).single()
+        if (!t) return
+        const asignadoA = (t.asignado_a || '').toLowerCase().trim()
+        const asignadoPor = (t.asignado_por || '').toLowerCase().trim()
+        if (email === asignadoA || email === asignadoPor) {
+          notify(`Actualización en "${t.titulo || ''}"`, c.texto?.slice(0, 120) || '', c.tarea_id)
+        }
+      })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [user])

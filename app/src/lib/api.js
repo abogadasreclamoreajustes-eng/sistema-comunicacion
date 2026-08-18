@@ -240,6 +240,49 @@ export async function actualizarTarea(tareaId, campos) {
   if (error) throw error
 }
 
+// ─── Comentarios/actualizaciones de tareas ────────────────
+export async function getComentariosPorTareas(tareaIds) {
+  if (!tareaIds || tareaIds.length === 0) return {}
+  const { data, error } = await supabase.from('tarea_comentarios').select('*').in('tarea_id', tareaIds)
+  if (error) throw error
+  data.sort((a, b) => (parseFlexibleDate(a.fecha) - parseFlexibleDate(b.fecha)))
+  const porTarea = {}
+  data.forEach(c => {
+    if (!porTarea[c.tarea_id]) porTarea[c.tarea_id] = []
+    porTarea[c.tarea_id].push(c)
+  })
+  return porTarea
+}
+
+export async function agregarComentarioTarea(tareaId, autorEmail, texto) {
+  if (!texto || !texto.trim()) return { ok: false }
+  const autor = autorEmail.toLowerCase().trim()
+  const id = newId()
+  const now = new Date().toISOString()
+  const { error } = await supabase.from('tarea_comentarios').insert({
+    id, tarea_id: tareaId, autor, texto: texto.trim(), fecha: now, leido_por: autor
+  })
+  if (error) throw error
+  return { ok: true, id }
+}
+
+export async function marcarComentariosLeidos(tareaId, userEmail) {
+  const email = userEmail.toLowerCase().trim()
+  const { data, error } = await supabase.from('tarea_comentarios').select('id,leido_por,autor').eq('tarea_id', tareaId)
+  if (error) throw error
+  const toUpdate = data.filter(c => {
+    const autor = (c.autor || '').toLowerCase().trim()
+    if (autor === email) return false
+    const leidos = String(c.leido_por || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean)
+    return !leidos.includes(email)
+  })
+  for (const c of toUpdate) {
+    const leidos = String(c.leido_por || '').split(',').map(x => x.trim()).filter(Boolean)
+    leidos.push(email)
+    await supabase.from('tarea_comentarios').update({ leido_por: leidos.join(',') }).eq('id', c.id)
+  }
+}
+
 // ─── Tareas recurrentes ──────────────────────────────────
 function fmtDDMMYYYY(d) {
   return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`
