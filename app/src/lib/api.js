@@ -63,18 +63,19 @@ export async function getUsuarios() {
 }
 
 // ─── Conversaciones ──────────────────────────────────────
-export async function getConversaciones(userEmail, todas, usuarios) {
+// modo 'propias' (default): solo las conversaciones donde el usuario participa.
+// modo 'equipo': solo las conversaciones AJENAS (ni participante1 ni participante2 es el usuario)
+// — para que una socia pueda mirar las conversaciones del equipo entre sí, separadas de las
+// propias, sin que se mezclen ni sumen a sus no leídos/notificaciones.
+export async function getConversaciones(userEmail, modo, usuarios) {
   const email = userEmail.toLowerCase().trim()
   const userMap = {}
   usuarios.forEach(u => { userMap[u.email] = u })
-  const solicitante = userMap[email]
-  const puedeVerTodas = !!(solicitante && solicitante.rol === 'socia')
-  const todasEfectivo = !!todas && puedeVerTodas
 
-  // Si no puede/no quiere ver todas, se filtra directo en la base (no se trae la tabla entera) —
-  // importante para que no se vuelva más lento a medida que crece el volumen de todo el estudio.
   let query = supabase.from('conversaciones').select('*').order('ultima_actividad', { ascending: false }).limit(2000)
-  if (!todasEfectivo) {
+  if (modo === 'equipo') {
+    query = query.neq('participante1', email).neq('participante2', email)
+  } else {
     query = query.or(`participante1.eq.${email},participante2.eq.${email}`)
   }
   const { data, error } = await query
@@ -86,12 +87,17 @@ export async function getConversaciones(userEmail, todas, usuarios) {
     const esMia = p1 === email || p2 === email
     const otroEmail = esMia ? (p1 === email ? p2 : p1) : p1
     const otro = userMap[otroEmail] || {}
+    const p1U = userMap[p1] || {}
+    const p2U = userMap[p2] || {}
     return {
       ...row,
       otroEmail,
       otroNombre: otro.nombre || otroEmail,
       otroColor: otro.color || '#7B6BA0',
       esMia,
+      participante1Nombre: p1U.nombre || row.participante1,
+      participante2Nombre: p2U.nombre || row.participante2,
+      participante1Color: p1U.color || '#7B6BA0',
       fijadaBool: String(row.fijada || '').toUpperCase() === 'SI',
       ultimaActTs: (parseFlexibleDate(row.ultima_actividad) || parseFlexibleDate(row.fecha_creacion) || new Date(0)).getTime()
     }

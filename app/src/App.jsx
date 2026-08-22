@@ -17,10 +17,11 @@ export default function App() {
   })
   const [usuarios, setUsuarios] = useState([])
   const [conversaciones, setConversaciones] = useState([])
+  const [conversacionesEquipo, setConversacionesEquipo] = useState([])
   const [mensajesUnread, setMensajesUnread] = useState({})
   const [activeConvId, setActiveConvId] = useState(null)
   const [view, setView] = useState('chat')
-  const [verTodas, setVerTodas] = useState(false)
+  const [tabMensajes, setTabMensajes] = useState('propias')
   const [showNewConv, setShowNewConv] = useState(false)
   const [refreshTick, setRefreshTick] = useState(0)
 
@@ -52,15 +53,24 @@ export default function App() {
 
   const reload = useCallback(async () => {
     if (!user || usuarios.length === 0) return
-    const convs = await getConversaciones(user.email, verTodas, usuarios)
+    const convs = await getConversaciones(user.email, 'propias', usuarios)
     setConversaciones(convs)
     // Liviano a propósito: solo cuenta no leídos, no trae el texto de cada mensaje de cada
     // conversación en cada recarga (eso escalaba mal con el volumen del estudio con el tiempo).
+    // Solo las conversaciones propias suman acá — las del equipo son solo para consultar, no
+    // generan contador de no leídos ni notificaciones.
     const counts = await getUnreadCounts(convs.map(c => c.id), user.email)
     setMensajesUnread(counts)
-  }, [user, usuarios, verTodas])
+  }, [user, usuarios])
 
   useEffect(() => { reload() }, [reload, refreshTick])
+
+  // Las conversaciones del equipo (ajenas) se cargan aparte, solo cuando la pestaña está activa
+  // — no se mezclan con las propias ni afectan no leídos/notificaciones.
+  useEffect(() => {
+    if (!user || !esSocia || tabMensajes !== 'equipo') return
+    getConversaciones(user.email, 'equipo', usuarios).then(setConversacionesEquipo).catch(() => {})
+  }, [user, esSocia, tabMensajes, usuarios, refreshTick])
 
   // Realtime: refresca la lista cuando cambia cualquier mensaje o conversación
   useEffect(() => {
@@ -110,15 +120,15 @@ export default function App() {
 
   if (!user) return <Login onLogin={handleLogin} />
 
-  const activeConv = conversaciones.find(c => c.id === activeConvId) || null
+  const activeConv = conversaciones.find(c => c.id === activeConvId) || conversacionesEquipo.find(c => c.id === activeConvId) || null
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
       <Sidebar
         view={view} setView={setView}
-        conversaciones={conversaciones} mensajesUnread={mensajesUnread}
+        conversaciones={conversaciones} conversacionesEquipo={conversacionesEquipo} mensajesUnread={mensajesUnread}
         activeConvId={activeConvId} setActiveConvId={setActiveConvId}
-        esSocia={esSocia} verTodas={verTodas} setVerTodas={setVerTodas}
+        esSocia={esSocia} tabMensajes={tabMensajes} setTabMensajes={setTabMensajes}
         onNuevaConversacion={() => setShowNewConv(true)}
         user={user} onLogout={handleLogout}
       />

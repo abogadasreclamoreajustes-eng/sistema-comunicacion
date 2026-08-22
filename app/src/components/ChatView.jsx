@@ -92,9 +92,17 @@ export default function ChatView({ conv, user, usuarios, onChanged }) {
         padding: '16px 24px', borderBottom: '1px solid var(--gris-borde)', background: 'var(--blanco)',
         display: 'flex', alignItems: 'center', gap: 12
       }}>
-        <div className="avatar" style={{ background: conv.otroColor }}>{initials(conv.otroNombre)}</div>
+        <div className="avatar" style={{ background: conv.esMia ? conv.otroColor : conv.participante1Color }}>
+          {conv.esMia ? initials(conv.otroNombre) : initials(conv.participante1Nombre)}
+        </div>
         <div style={{ flex: 1 }}>
-          {editingName ? (
+          {!conv.esMia ? (
+            <div style={{ fontWeight: 700, fontSize: 15 }}>
+              {conv.nombre_conv || `${conv.participante1Nombre} · ${conv.participante2Nombre}`}
+              {conv.nombre_conv && <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--gris-texto)' }}> · {conv.participante1Nombre} · {conv.participante2Nombre}</span>}
+              <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: 'var(--violeta)' }}>· viendo como socia</span>
+            </div>
+          ) : editingName ? (
             <form onSubmit={async e => { e.preventDefault(); await renombrarConversacion(conv.id, nameDraft); setEditingName(false); onChanged && onChanged() }}
               style={{ display: 'flex', gap: 6 }}>
               <input autoFocus value={nameDraft} onChange={e => setNameDraft(e.target.value)} style={{ fontSize: 13, padding: '4px 8px' }} />
@@ -187,7 +195,7 @@ export default function ChatView({ conv, user, usuarios, onChanged }) {
                   )}
                 </div>
               </div>
-              {!eliminado && (
+              {!eliminado && conv.esMia && (
                 <div style={{ display: 'flex', gap: 10 }}>
                   <button onClick={() => setReplyTo(m)} style={{
                     background: 'none', border: 'none', fontSize: 11, color: 'var(--gris-texto)', padding: '2px 4px', fontWeight: 400
@@ -206,6 +214,14 @@ export default function ChatView({ conv, user, usuarios, onChanged }) {
         <div ref={bottomRef} />
       </div>
 
+      {!conv.esMia ? (
+        <div style={{
+          padding: '14px 24px', borderTop: '1px solid var(--gris-borde)', background: 'var(--lila-suave)',
+          fontSize: 12, color: 'var(--gris-texto)', textAlign: 'center'
+        }}>
+          Estás viendo esta conversación del equipo — no formás parte de ella, así que no podés escribir acá.
+        </div>
+      ) : (
       <form onSubmit={handleSend} style={{ padding: '14px 24px', borderTop: '1px solid var(--gris-borde)', background: 'var(--blanco)' }}>
         {replyTo && (
           <div style={{
@@ -227,6 +243,7 @@ export default function ChatView({ conv, user, usuarios, onChanged }) {
           <button type="submit" className="btn-primary" style={{ padding: '11px 22px' }}>Enviar</button>
         </div>
       </form>
+      )}
     </div>
   )
 }

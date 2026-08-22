@@ -6,35 +6,40 @@ function initials(name) {
 }
 
 export default function Sidebar({
-  view, setView, conversaciones, mensajesUnread, activeConvId, setActiveConvId,
-  esSocia, verTodas, setVerTodas, onNuevaConversacion, user, onLogout
+  view, setView, conversaciones, conversacionesEquipo, mensajesUnread, activeConvId, setActiveConvId,
+  esSocia, tabMensajes, setTabMensajes, onNuevaConversacion, user, onLogout
 }) {
   const [busqueda, setBusqueda] = useState('')
   const [soloNoLeidos, setSoloNoLeidos] = useState(false)
   const [idsConMatch, setIdsConMatch] = useState(null)
   const q = busqueda.trim().toLowerCase()
 
+  const listaBase = tabMensajes === 'equipo' ? conversacionesEquipo : conversaciones
+
   // Búsqueda de texto en mensajes: se hace en la base bajo demanda (con un pequeño debounce),
   // no precargando todos los mensajes de todas las conversaciones en memoria.
   useEffect(() => {
     if (!q) { setIdsConMatch(null); return }
     const t = setTimeout(() => {
-      buscarMensajesTexto(conversaciones.map(c => c.id), q).then(setIdsConMatch).catch(() => setIdsConMatch([]))
+      buscarMensajesTexto(listaBase.map(c => c.id), q).then(setIdsConMatch).catch(() => setIdsConMatch([]))
     }, 300)
     return () => clearTimeout(t)
-  }, [q, conversaciones])
+  }, [q, listaBase])
 
   const totalNoLeidos = conversaciones.reduce((acc, c) => acc + (mensajesUnread[c.id] || 0), 0)
 
-  const conversacionesFiltradas = conversaciones.filter(c => {
-    if (soloNoLeidos && !(mensajesUnread[c.id] > 0)) return false
+  const conversacionesFiltradas = listaBase.filter(c => {
+    if (tabMensajes === 'propias' && soloNoLeidos && !(mensajesUnread[c.id] > 0)) return false
     if (!q) return true
     const matchMeta = (c.nombre_conv || '').toLowerCase().includes(q) ||
       (c.otroNombre || '').toLowerCase().includes(q) ||
+      (c.participante1Nombre || '').toLowerCase().includes(q) ||
+      (c.participante2Nombre || '').toLowerCase().includes(q) ||
       (c.ultimo_mensaje || '').toLowerCase().includes(q)
     if (matchMeta) return true
     return idsConMatch ? idsConMatch.includes(c.id) : false
   })
+
   return (
     <div style={{
       width: 320, background: 'var(--blanco)', borderRight: '1px solid var(--gris-borde)',
@@ -71,59 +76,76 @@ export default function Sidebar({
               + Nueva conversación
             </button>
           </div>
+
           {esSocia && (
-            <div style={{ padding: '0 20px 8px', display: 'flex', gap: 6 }}>
-              <label style={{ fontSize: 12, color: 'var(--gris-texto)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <input type="checkbox" checked={verTodas} onChange={e => setVerTodas(e.target.checked)} style={{ width: 'auto' }} />
-                Ver todas las conversaciones del equipo
-              </label>
+            <div style={{ padding: '0 20px 8px', display: 'flex', gap: 8 }}>
+              <button onClick={() => setTabMensajes('propias')} className={tabMensajes === 'propias' ? 'btn-primary' : 'btn-secondary'}
+                style={{ flex: 1, fontSize: 12, padding: '7px 0' }}>Mías</button>
+              <button onClick={() => setTabMensajes('equipo')} className={tabMensajes === 'equipo' ? 'btn-primary' : 'btn-secondary'}
+                style={{ flex: 1, fontSize: 12, padding: '7px 0' }}>Equipo</button>
             </div>
           )}
+
           <div style={{ padding: '0 20px 8px' }}>
             <input
               type="text" value={busqueda} onChange={e => setBusqueda(e.target.value)}
-              placeholder="Buscar conversación o mensaje..."
+              placeholder={tabMensajes === 'equipo' ? 'Buscar en conversaciones del equipo...' : 'Buscar conversación o mensaje...'}
               style={{ fontSize: 13, padding: '8px 12px' }}
             />
           </div>
-          <div style={{ padding: '0 20px 8px', display: 'flex', gap: 8 }}>
-            <button onClick={() => setSoloNoLeidos(false)} className={!soloNoLeidos ? 'btn-primary' : 'btn-secondary'}
-              style={{ flex: 1, fontSize: 12, padding: '6px 0' }}>Todas</button>
-            <button onClick={() => setSoloNoLeidos(true)} className={soloNoLeidos ? 'btn-primary' : 'btn-secondary'}
-              style={{ flex: 1, fontSize: 12, padding: '6px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-              No leídos
-              {totalNoLeidos > 0 && <span className="badge" style={{ background: soloNoLeidos ? 'rgba(255,255,255,.3)' : undefined }}>{totalNoLeidos}</span>}
-            </button>
-          </div>
+
+          {tabMensajes === 'propias' && (
+            <div style={{ padding: '0 20px 8px', display: 'flex', gap: 8 }}>
+              <button onClick={() => setSoloNoLeidos(false)} className={!soloNoLeidos ? 'btn-primary' : 'btn-secondary'}
+                style={{ flex: 1, fontSize: 12, padding: '6px 0' }}>Todas</button>
+              <button onClick={() => setSoloNoLeidos(true)} className={soloNoLeidos ? 'btn-primary' : 'btn-secondary'}
+                style={{ flex: 1, fontSize: 12, padding: '6px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                No leídos
+                {totalNoLeidos > 0 && <span className="badge" style={{ background: soloNoLeidos ? 'rgba(255,255,255,.3)' : undefined }}>{totalNoLeidos}</span>}
+              </button>
+            </div>
+          )}
+
+          {tabMensajes === 'equipo' && (
+            <div style={{ padding: '0 20px 8px', fontSize: 11, color: 'var(--gris-texto)' }}>
+              Conversaciones del resto del equipo, solo para consultar — no generan notificaciones.
+            </div>
+          )}
+
           <div style={{ flex: 1, overflowY: 'auto' }}>
-            {conversaciones.length === 0 && (
+            {listaBase.length === 0 && (
               <div style={{ padding: 24, color: 'var(--gris-texto)', fontSize: 13, textAlign: 'center' }}>
-                No hay conversaciones todavía.
+                {tabMensajes === 'equipo' ? 'No hay conversaciones del equipo todavía.' : 'No hay conversaciones todavía.'}
               </div>
             )}
-            {conversaciones.length > 0 && conversacionesFiltradas.length === 0 && soloNoLeidos && !q && (
+            {listaBase.length > 0 && conversacionesFiltradas.length === 0 && soloNoLeidos && !q && tabMensajes === 'propias' && (
               <div style={{ padding: 24, color: 'var(--gris-texto)', fontSize: 13, textAlign: 'center' }}>
                 No tenés conversaciones sin leer. 🎉
               </div>
             )}
-            {conversaciones.length > 0 && conversacionesFiltradas.length === 0 && q && (
+            {listaBase.length > 0 && conversacionesFiltradas.length === 0 && q && (
               <div style={{ padding: 24, color: 'var(--gris-texto)', fontSize: 13, textAlign: 'center' }}>
                 Sin resultados para "{busqueda}".
               </div>
             )}
             {conversacionesFiltradas.map(c => {
-              const unread = mensajesUnread[c.id] || 0
+              const unread = tabMensajes === 'propias' ? (mensajesUnread[c.id] || 0) : 0
               const active = c.id === activeConvId
+              const nombrePrincipal = c.esMia
+                ? (c.nombre_conv ? c.nombre_conv : c.otroNombre)
+                : (c.nombre_conv ? c.nombre_conv : `${c.participante1Nombre} · ${c.participante2Nombre}`)
+              const avatarColor = c.esMia ? c.otroColor : (c.participante1Color || '#7B6BA0')
+              const avatarLetras = c.esMia ? initials(c.otroNombre) : initials(c.participante1Nombre)
               return (
                 <div key={c.id} onClick={() => setActiveConvId(c.id)} style={{
                   display: 'flex', gap: 12, alignItems: 'center', padding: '12px 20px', cursor: 'pointer',
                   background: active ? 'var(--lila-suave)' : 'transparent', borderLeft: active ? '3px solid var(--violeta-oscuro)' : '3px solid transparent'
                 }}>
-                  <div className="avatar" style={{ background: c.otroColor }}>{initials(c.otroNombre)}</div>
+                  <div className="avatar" style={{ background: avatarColor }}>{avatarLetras}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                       <span style={{ fontWeight: 700, fontSize: 13.5 }}>
-                        {c.nombre_conv ? c.nombre_conv : c.otroNombre}
+                        {nombrePrincipal}
                         {c.fijadaBool && ' 📌'}
                       </span>
                       <span style={{ fontSize: 11, color: 'var(--gris-texto)' }}>{fmtHora(c.ultima_actividad)}</span>
@@ -135,7 +157,8 @@ export default function Sidebar({
                       }}>{c.ultimo_mensaje || 'Sin mensajes'}</span>
                       {unread > 0 && <span className="badge">{unread}</span>}
                     </div>
-                    {c.nombre_conv && <div style={{ fontSize: 11, color: 'var(--violeta)' }}>{c.otroNombre}</div>}
+                    {c.esMia && c.nombre_conv && <div style={{ fontSize: 11, color: 'var(--violeta)' }}>{c.otroNombre}</div>}
+                    {!c.esMia && c.nombre_conv && <div style={{ fontSize: 11, color: 'var(--violeta)' }}>{c.participante1Nombre} · {c.participante2Nombre}</div>}
                   </div>
                 </div>
               )
