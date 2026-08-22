@@ -65,23 +65,22 @@ export async function getUsuarios() {
 // ─── Conversaciones ──────────────────────────────────────
 export async function getConversaciones(userEmail, todas, usuarios) {
   const email = userEmail.toLowerCase().trim()
-  let query = supabase.from('conversaciones').select('*')
-  const { data, error } = await query
-  if (error) throw error
   const userMap = {}
   usuarios.forEach(u => { userMap[u.email] = u })
   const solicitante = userMap[email]
   const puedeVerTodas = !!(solicitante && solicitante.rol === 'socia')
   const todasEfectivo = !!todas && puedeVerTodas
 
-  const filtered = data.filter(row => {
-    const p1 = (row.participante1 || '').toLowerCase().trim()
-    const p2 = (row.participante2 || '').toLowerCase().trim()
-    const esMia = p1 === email || p2 === email
-    return todasEfectivo || esMia
-  })
+  // Si no puede/no quiere ver todas, se filtra directo en la base (no se trae la tabla entera) —
+  // importante para que no se vuelva más lento a medida que crece el volumen de todo el estudio.
+  let query = supabase.from('conversaciones').select('*').order('ultima_actividad', { ascending: false }).limit(2000)
+  if (!todasEfectivo) {
+    query = query.or(`participante1.eq.${email},participante2.eq.${email}`)
+  }
+  const { data, error } = await query
+  if (error) throw error
 
-  const withMeta = filtered.map(row => {
+  const withMeta = data.map(row => {
     const p1 = (row.participante1 || '').toLowerCase().trim()
     const p2 = (row.participante2 || '').toLowerCase().trim()
     const esMia = p1 === email || p2 === email
@@ -130,8 +129,15 @@ export async function renombrarConversacion(convId, nombre) {
 }
 
 // ─── Mensajes ────────────────────────────────────────────
+// Trae los últimos 500 mensajes de la conversación. Una conversación puntual podría acumular
+// muchísimos mensajes con el uso diario del estudio a lo largo de meses/años — sin este límite,
+// esa conversación se pondría cada vez más lenta de abrir para siempre. 500 alcanza de sobra para
+// el uso normal del chat (no es un archivo histórico de expediente).
+const LIMITE_MENSAJES = 500
+
 export async function getMensajes(convId) {
   const { data, error } = await supabase.from('mensajes_conv').select('*').eq('conv_id', convId)
+    .order('fecha', { ascending: false }).limit(LIMITE_MENSAJES)
   if (error) throw error
   data.sort((a, b) => (parseFlexibleDate(a.fecha) - parseFlexibleDate(b.fecha)))
   return data
@@ -159,21 +165,13 @@ export async function eliminarMensaje(mensajeId) {
   if (error) throw error
 }
 
+// El marcado como leído se hace con una función en la base (marcar_mensajes_leidos) que actualiza
+// todo en un solo UPDATE atómico por fila, en vez de leer acá y volver a escribir: si dos personas
+// abrían el mismo hilo casi al mismo tiempo, con el patrón viejo una de las dos marcas se podía
+// perder (se pisaban la lectura de leido_por antes de que la otra terminara de escribir).
 export async function marcarMensajesLeidos(convId, userEmail) {
-  const email = userEmail.toLowerCase().trim()
-  const { data, error } = await supabase.from('mensajes_conv').select('id,leido_por,autor').eq('conv_id', convId)
+  const { error } = await supabase.rpc('marcar_mensajes_leidos', { p_conv_id: convId, p_email: userEmail.toLowerCase().trim() })
   if (error) throw error
-  const toUpdate = data.filter(m => {
-    const autor = (m.autor || '').toLowerCase().trim()
-    if (autor === email) return false
-    const leidos = String(m.leido_por || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean)
-    return !leidos.includes(email)
-  })
-  for (const m of toUpdate) {
-    const leidos = String(m.leido_por || '').split(',').map(x => x.trim()).filter(Boolean)
-    leidos.push(email)
-    await supabase.from('mensajes_conv').update({ leido_por: leidos.join(',') }).eq('id', m.id)
-  }
 }
 
 export function unreadCount(mensajes, userEmail) {
@@ -186,27 +184,56 @@ export function unreadCount(mensajes, userEmail) {
   }).length
 }
 
+// Cuenta de no leídos por conversación, para el sidebar. A propósito NO trae el texto de los
+// mensajes (que puede pesar mucho con el tiempo) — solo las columnas mínimas para calcular el
+// contador, y solo de mensajes que no son propios.
+export async function getUnreadCounts(convIds, userEmail) {
+  const email = userEmail.toLowerCase().trim()
+  const counts = {}
+  if (!convIds || convIds.length === 0) return counts
+  const { data, error } = await supabase.from('mensajes_conv').select('conv_id,leido_por')
+    .in('conv_id', convIds).neq('autor', email).eq('eliminado', 'NO')
+  if (error) throw error
+  data.forEach(m => {
+    const leidos = String(m.leido_por || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean)
+    if (!leidos.includes(email)) counts[m.conv_id] = (counts[m.conv_id] || 0) + 1
+  })
+  return counts
+}
+
+// Búsqueda de texto en mensajes bajo demanda (no precarga todos los mensajes de todas las
+// conversaciones en memoria — eso no escala si el estudio acumula miles de mensajes con el
+// tiempo). Se ejecuta en la base con ilike, solo sobre las conversaciones que ya se le pasan
+// (las que el usuario puede ver), y devuelve nada más los ids de conversación que matchean.
+export async function buscarMensajesTexto(convIds, texto) {
+  const q = (texto || '').trim()
+  if (!convIds || convIds.length === 0 || !q) return []
+  const { data, error } = await supabase.from('mensajes_conv').select('conv_id')
+    .in('conv_id', convIds).eq('eliminado', 'NO').ilike('texto', `%${q}%`).limit(300)
+  if (error) throw error
+  return [...new Set(data.map(m => m.conv_id))]
+}
+
 // ─── Tareas ──────────────────────────────────────────────
 export async function getTareas(userEmail, modo, esSocia) {
   const email = userEmail.toLowerCase().trim()
-  const { data, error } = await supabase.from('tareas').select('*')
-  if (error) throw error
   let modoEfectivo = 'propias'
   if (esSocia && (modo === 'ajenas' || modo === 'asignadas')) modoEfectivo = modo
 
-  const filtered = data.filter(t => {
-    const asignadoA = (t.asignado_a || '').toLowerCase().trim()
-    const asignadoPor = (t.asignado_por || '').toLowerCase().trim()
-    if (modoEfectivo === 'propias') return asignadoA === email
-    if (modoEfectivo === 'asignadas') return asignadoPor === email
-    if (modoEfectivo === 'ajenas') return asignadoA !== email && asignadoPor !== email
-    return true
-  })
+  // Filtrado en la base según el modo, en vez de traer TODAS las tareas del estudio y filtrar acá
+  // — para que "Mis tareas" de una empleada no se ponga cada vez más pesado a medida que se
+  // acumulan años de tareas de todo el equipo.
+  let query = supabase.from('tareas').select('*').limit(3000)
+  if (modoEfectivo === 'propias') query = query.eq('asignado_a', email)
+  else if (modoEfectivo === 'asignadas') query = query.eq('asignado_por', email)
+  else if (modoEfectivo === 'ajenas') query = query.neq('asignado_a', email).neq('asignado_por', email)
+  const { data, error } = await query
+  if (error) throw error
 
   const ahora = Date.now()
   const pesoEstado = { pendiente: 1, 'en progreso': 1, reprogramada: 1, completada: 2 }
   const pesoPrioridad = { Urgente: 0, Alta: 1, Normal: 2, Baja: 3 }
-  const withMeta = filtered.map(t => {
+  const withMeta = data.map(t => {
     const vencTs = (parseFlexibleDate(t.fecha_vencimiento) || null)?.getTime() || 0
     const estado = t.estado || 'pendiente'
     return { ...t, vencTs, vencida: vencTs > 0 && vencTs < ahora && estado !== 'completada', estado }
@@ -243,7 +270,7 @@ export async function actualizarTarea(tareaId, campos) {
 // ─── Comentarios/actualizaciones de tareas ────────────────
 export async function getComentariosPorTareas(tareaIds) {
   if (!tareaIds || tareaIds.length === 0) return {}
-  const { data, error } = await supabase.from('tarea_comentarios').select('*').in('tarea_id', tareaIds)
+  const { data, error } = await supabase.from('tarea_comentarios').select('*').in('tarea_id', tareaIds).limit(5000)
   if (error) throw error
   data.sort((a, b) => (parseFlexibleDate(a.fecha) - parseFlexibleDate(b.fecha)))
   const porTarea = {}
@@ -266,21 +293,11 @@ export async function agregarComentarioTarea(tareaId, autorEmail, texto) {
   return { ok: true, id }
 }
 
+// Igual que marcarMensajesLeidos: UPDATE atómico por fila en la base, no lectura+escritura desde
+// acá (evita que se pierda la marca de leído si dos personas abren el mismo hilo casi juntas).
 export async function marcarComentariosLeidos(tareaId, userEmail) {
-  const email = userEmail.toLowerCase().trim()
-  const { data, error } = await supabase.from('tarea_comentarios').select('id,leido_por,autor').eq('tarea_id', tareaId)
+  const { error } = await supabase.rpc('marcar_comentarios_leidos', { p_tarea_id: tareaId, p_email: userEmail.toLowerCase().trim() })
   if (error) throw error
-  const toUpdate = data.filter(c => {
-    const autor = (c.autor || '').toLowerCase().trim()
-    if (autor === email) return false
-    const leidos = String(c.leido_por || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean)
-    return !leidos.includes(email)
-  })
-  for (const c of toUpdate) {
-    const leidos = String(c.leido_por || '').split(',').map(x => x.trim()).filter(Boolean)
-    leidos.push(email)
-    await supabase.from('tarea_comentarios').update({ leido_por: leidos.join(',') }).eq('id', c.id)
-  }
 }
 
 // ─── Tareas recurrentes ──────────────────────────────────

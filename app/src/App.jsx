@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { supabase } from './lib/supabase'
-import { getUsuarios, getConversaciones, getMensajes, unreadCount, generarTareasRecurrentesPendientes } from './lib/api'
+import { getUsuarios, getConversaciones, getUnreadCounts, generarTareasRecurrentesPendientes } from './lib/api'
 import { requestNotificationPermission, notify } from './lib/notifications'
 import Login from './components/Login'
 import Sidebar from './components/Sidebar'
@@ -18,7 +18,6 @@ export default function App() {
   const [usuarios, setUsuarios] = useState([])
   const [conversaciones, setConversaciones] = useState([])
   const [mensajesUnread, setMensajesUnread] = useState({})
-  const [mensajesPorConv, setMensajesPorConv] = useState({})
   const [activeConvId, setActiveConvId] = useState(null)
   const [view, setView] = useState('chat')
   const [verTodas, setVerTodas] = useState(false)
@@ -55,12 +54,10 @@ export default function App() {
     if (!user || usuarios.length === 0) return
     const convs = await getConversaciones(user.email, verTodas, usuarios)
     setConversaciones(convs)
-    const entries = await Promise.all(convs.map(async c => {
-      const msgs = await getMensajes(c.id)
-      return [c.id, msgs]
-    }))
-    setMensajesPorConv(Object.fromEntries(entries))
-    setMensajesUnread(Object.fromEntries(entries.map(([id, msgs]) => [id, unreadCount(msgs, user.email)])))
+    // Liviano a propósito: solo cuenta no leídos, no trae el texto de cada mensaje de cada
+    // conversación en cada recarga (eso escalaba mal con el volumen del estudio con el tiempo).
+    const counts = await getUnreadCounts(convs.map(c => c.id), user.email)
+    setMensajesUnread(counts)
   }, [user, usuarios, verTodas])
 
   useEffect(() => { reload() }, [reload, refreshTick])
@@ -119,7 +116,7 @@ export default function App() {
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
       <Sidebar
         view={view} setView={setView}
-        conversaciones={conversaciones} mensajesUnread={mensajesUnread} mensajesPorConv={mensajesPorConv}
+        conversaciones={conversaciones} mensajesUnread={mensajesUnread}
         activeConvId={activeConvId} setActiveConvId={setActiveConvId}
         esSocia={esSocia} verTodas={verTodas} setVerTodas={setVerTodas}
         onNuevaConversacion={() => setShowNewConv(true)}

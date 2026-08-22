@@ -1,24 +1,40 @@
-import { useState } from 'react'
-import { fmtHora } from '../lib/api'
+import { useEffect, useState } from 'react'
+import { fmtHora, buscarMensajesTexto } from '../lib/api'
 
 function initials(name) {
   return (name || '?').trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase()
 }
 
 export default function Sidebar({
-  view, setView, conversaciones, mensajesUnread, mensajesPorConv, activeConvId, setActiveConvId,
+  view, setView, conversaciones, mensajesUnread, activeConvId, setActiveConvId,
   esSocia, verTodas, setVerTodas, onNuevaConversacion, user, onLogout
 }) {
   const [busqueda, setBusqueda] = useState('')
+  const [soloNoLeidos, setSoloNoLeidos] = useState(false)
+  const [idsConMatch, setIdsConMatch] = useState(null)
   const q = busqueda.trim().toLowerCase()
-  const conversacionesFiltradas = q
-    ? conversaciones.filter(c => (
-        (c.nombre_conv || '').toLowerCase().includes(q) ||
-        (c.otroNombre || '').toLowerCase().includes(q) ||
-        (c.ultimo_mensaje || '').toLowerCase().includes(q) ||
-        (mensajesPorConv?.[c.id] || []).some(m => m.eliminado !== 'SI' && (m.texto || '').toLowerCase().includes(q))
-      ))
-    : conversaciones
+
+  // Búsqueda de texto en mensajes: se hace en la base bajo demanda (con un pequeño debounce),
+  // no precargando todos los mensajes de todas las conversaciones en memoria.
+  useEffect(() => {
+    if (!q) { setIdsConMatch(null); return }
+    const t = setTimeout(() => {
+      buscarMensajesTexto(conversaciones.map(c => c.id), q).then(setIdsConMatch).catch(() => setIdsConMatch([]))
+    }, 300)
+    return () => clearTimeout(t)
+  }, [q, conversaciones])
+
+  const totalNoLeidos = conversaciones.reduce((acc, c) => acc + (mensajesUnread[c.id] || 0), 0)
+
+  const conversacionesFiltradas = conversaciones.filter(c => {
+    if (soloNoLeidos && !(mensajesUnread[c.id] > 0)) return false
+    if (!q) return true
+    const matchMeta = (c.nombre_conv || '').toLowerCase().includes(q) ||
+      (c.otroNombre || '').toLowerCase().includes(q) ||
+      (c.ultimo_mensaje || '').toLowerCase().includes(q)
+    if (matchMeta) return true
+    return idsConMatch ? idsConMatch.includes(c.id) : false
+  })
   return (
     <div style={{
       width: 320, background: 'var(--blanco)', borderRight: '1px solid var(--gris-borde)',
@@ -70,13 +86,27 @@ export default function Sidebar({
               style={{ fontSize: 13, padding: '8px 12px' }}
             />
           </div>
+          <div style={{ padding: '0 20px 8px', display: 'flex', gap: 8 }}>
+            <button onClick={() => setSoloNoLeidos(false)} className={!soloNoLeidos ? 'btn-primary' : 'btn-secondary'}
+              style={{ flex: 1, fontSize: 12, padding: '6px 0' }}>Todas</button>
+            <button onClick={() => setSoloNoLeidos(true)} className={soloNoLeidos ? 'btn-primary' : 'btn-secondary'}
+              style={{ flex: 1, fontSize: 12, padding: '6px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+              No leídos
+              {totalNoLeidos > 0 && <span className="badge" style={{ background: soloNoLeidos ? 'rgba(255,255,255,.3)' : undefined }}>{totalNoLeidos}</span>}
+            </button>
+          </div>
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {conversaciones.length === 0 && (
               <div style={{ padding: 24, color: 'var(--gris-texto)', fontSize: 13, textAlign: 'center' }}>
                 No hay conversaciones todavía.
               </div>
             )}
-            {conversaciones.length > 0 && conversacionesFiltradas.length === 0 && (
+            {conversaciones.length > 0 && conversacionesFiltradas.length === 0 && soloNoLeidos && !q && (
+              <div style={{ padding: 24, color: 'var(--gris-texto)', fontSize: 13, textAlign: 'center' }}>
+                No tenés conversaciones sin leer. 🎉
+              </div>
+            )}
+            {conversaciones.length > 0 && conversacionesFiltradas.length === 0 && q && (
               <div style={{ padding: 24, color: 'var(--gris-texto)', fontSize: 13, textAlign: 'center' }}>
                 Sin resultados para "{busqueda}".
               </div>
