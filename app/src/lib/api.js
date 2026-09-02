@@ -346,6 +346,34 @@ function parseLocalDateInput(s) {
   return new Date(y, m - 1, d)
 }
 
+// n-ésimo día de la semana de un mes (weekday: 0=domingo..6=sábado, posicion: 1..4, o -1 para "el
+// último"). Devuelve null si ese mes no tiene esa ocurrencia (ej. un 5to lunes). Espejo en SQL de
+// app_nth_weekday_of_month, usado acá solo para calcular la primera fecha al crear la plantilla.
+function nEsimoDiaSemanaDelMes(year, month, weekday, posicion) {
+  if (posicion === -1) {
+    const ultimo = new Date(year, month + 1, 0)
+    const diff = (ultimo.getDay() - weekday + 7) % 7
+    ultimo.setDate(ultimo.getDate() - diff)
+    return ultimo
+  }
+  const primero = new Date(year, month, 1)
+  const diff = (weekday - primero.getDay() + 7) % 7
+  const dia = 1 + diff + (posicion - 1) * 7
+  const candidato = new Date(year, month, dia)
+  return candidato.getMonth() === month ? candidato : null
+}
+
+function primeraOcurrenciaMensualDiaSemana(weekday, posicion, desde) {
+  let y = desde.getFullYear(), m = desde.getMonth()
+  for (let i = 0; i < 24; i++) {
+    const cand = nEsimoDiaSemanaDelMes(y, m, weekday, posicion)
+    if (cand && cand.getTime() >= desde.getTime()) return cand
+    m++
+    if (m > 11) { m = 0; y++ }
+  }
+  return desde
+}
+
 export async function getTareasRecurrentes(userEmail, modo, esSocia) {
   const email = userEmail.toLowerCase().trim()
   const { data, error } = await supabase.from('tareas_recurrentes').select('*')
@@ -369,6 +397,12 @@ export async function crearTareaRecurrente({ titulo, descripcion, asignadoPor, a
   const id = newId()
   const now = new Date().toISOString()
   const inicio = fechaInicio ? parseLocalDateInput(fechaInicio) : new Date()
+  // Para "mensual por día de semana" (ej. "el último miércoles del mes") no tiene sentido pedirle
+  // a la persona que adivine la fecha exacta en el calendario — se calcula sola, la primera
+  // ocurrencia a partir de la fecha de inicio elegida.
+  const primeraFecha = tipoFrecuencia === 'mensual_dia_semana' && frecuenciaConfig
+    ? primeraOcurrenciaMensualDiaSemana(frecuenciaConfig.diaSemana, frecuenciaConfig.posicion, inicio)
+    : inicio
   const { error } = await supabase.from('tareas_recurrentes').insert({
     id, titulo, descripcion: descripcion || '',
     asignado_por: asignadoPor.toLowerCase().trim(), asignado_a: asignadoA.toLowerCase().trim(),
@@ -376,7 +410,7 @@ export async function crearTareaRecurrente({ titulo, descripcion, asignadoPor, a
     tipo_frecuencia: tipoFrecuencia, frecuencia_config: JSON.stringify(frecuenciaConfig || {}),
     hora_sugerida: horaSugerida || null, prioridad: prioridad || 'Normal',
     recordatorio_dias: recordatorioDias ?? 0, checklist: '[]', activa: 'SI',
-    proxima_fecha: fmtDDMMYYYY(inicio), ultima_generacion: null, fecha_creacion: now
+    proxima_fecha: fmtDDMMYYYY(primeraFecha), ultima_generacion: null, fecha_creacion: now
   })
   if (error) throw error
   return { ok: true, id }

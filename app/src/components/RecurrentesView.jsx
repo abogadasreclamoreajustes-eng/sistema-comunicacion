@@ -6,6 +6,11 @@ const DIAS_SEMANA = [
   { v: 1, label: 'Lun' }, { v: 2, label: 'Mar' }, { v: 3, label: 'Mié' }, { v: 4, label: 'Jue' },
   { v: 5, label: 'Vie' }, { v: 6, label: 'Sáb' }, { v: 0, label: 'Dom' }
 ]
+const POSICIONES = [
+  { v: 1, label: '1º' }, { v: 2, label: '2º' }, { v: 3, label: '3º' }, { v: 4, label: '4º' }, { v: -1, label: 'Último' }
+]
+const nombreDia = v => DIAS_SEMANA.find(d => d.v === v)?.label || ''
+const nombrePosicion = v => POSICIONES.find(p => p.v === v)?.label || ''
 
 function describirFrecuencia(t) {
   if (t.tipo_frecuencia === 'diaria') return 'Todos los días'
@@ -17,6 +22,10 @@ function describirFrecuencia(t) {
   if (t.tipo_frecuencia === 'mensual') {
     const dia = t.frecuenciaConfigObj?.diaMes
     return dia ? `Mensual: día ${dia}` : 'Mensual'
+  }
+  if (t.tipo_frecuencia === 'mensual_dia_semana') {
+    const { diaSemana, posicion } = t.frecuenciaConfigObj || {}
+    return `Mensual: ${nombrePosicion(posicion)} ${nombreDia(diaSemana)} del mes`
   }
   return t.tipo_frecuencia
 }
@@ -110,11 +119,14 @@ function NewRecurrenteModal({ user, usuarios, onClose, onCreated }) {
   const [descripcion, setDescripcion] = useState('')
   const [asignadoA, setAsignadoA] = useState(user.email)
   const [tipoFrecuencia, setTipoFrecuencia] = useState('semanal')
-  const [diasSemana, setDiasSemana] = useState([1])
+  const [diasSemana, setDiasSemana] = useState([])
   const [diaMes, setDiaMes] = useState(1)
+  const [diaSemanaMensual, setDiaSemanaMensual] = useState(3)
+  const [posicionMensual, setPosicionMensual] = useState(-1)
   const [fechaInicio, setFechaInicio] = useState(new Date().toISOString().substring(0, 10))
   const [fechaFin, setFechaFin] = useState('')
   const [prioridad, setPrioridad] = useState('Normal')
+  const [error, setError] = useState('')
 
   function toggleDia(v) {
     setDiasSemana(d => d.includes(v) ? d.filter(x => x !== v) : [...d, v].sort())
@@ -122,9 +134,16 @@ function NewRecurrenteModal({ user, usuarios, onClose, onCreated }) {
 
   async function handleSubmit(e) {
     e.preventDefault()
+    setError('')
     if (!titulo.trim()) return
+    if (tipoFrecuencia === 'semanal' && diasSemana.length === 0) {
+      setError('Elegí al menos un día de la semana.')
+      return
+    }
     const frecuenciaConfig = tipoFrecuencia === 'semanal' ? { diasSemana }
-      : tipoFrecuencia === 'mensual' ? { diaMes: Number(diaMes) } : {}
+      : tipoFrecuencia === 'mensual' ? { diaMes: Number(diaMes) }
+      : tipoFrecuencia === 'mensual_dia_semana' ? { diaSemana: diaSemanaMensual, posicion: posicionMensual }
+      : {}
     await crearTareaRecurrente({
       titulo: titulo.trim(), descripcion, asignadoPor: user.email, asignadoA,
       fechaInicio, fechaFin: fechaFin || null, tipoFrecuencia, frecuenciaConfig, prioridad
@@ -148,28 +167,48 @@ function NewRecurrenteModal({ user, usuarios, onClose, onCreated }) {
         <label style={{ fontSize: 13, fontWeight: 600 }}>Frecuencia</label>
         <select value={tipoFrecuencia} onChange={e => setTipoFrecuencia(e.target.value)} style={{ marginBottom: 12, marginTop: 4 }}>
           <option value="diaria">Diaria</option>
-          <option value="semanal">Semanal</option>
-          <option value="mensual">Mensual</option>
+          <option value="semanal">Semanal (ej: todos los miércoles)</option>
+          <option value="mensual">Mensual — por día del mes (ej: día 15)</option>
+          <option value="mensual_dia_semana">Mensual — por día de semana (ej: último miércoles)</option>
         </select>
 
         {tipoFrecuencia === 'semanal' && (
-          <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
-            {DIAS_SEMANA.map(d => (
-              <label key={d.v} style={{
-                display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, padding: '5px 9px',
-                borderRadius: 8, border: '1px solid var(--gris-borde)',
-                background: diasSemana.includes(d.v) ? 'var(--lila-suave)' : 'transparent'
-              }}>
-                <input type="checkbox" checked={diasSemana.includes(d.v)} onChange={() => toggleDia(d.v)} style={{ width: 'auto' }} />
-                {d.label}
-              </label>
-            ))}
-          </div>
+          <>
+            <div style={{ display: 'flex', gap: 6, marginBottom: error ? 6 : 12, flexWrap: 'wrap' }}>
+              {DIAS_SEMANA.map(d => (
+                <label key={d.v} style={{
+                  display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, padding: '5px 9px',
+                  borderRadius: 8, border: '1px solid var(--gris-borde)',
+                  background: diasSemana.includes(d.v) ? 'var(--lila-suave)' : 'transparent'
+                }}>
+                  <input type="checkbox" checked={diasSemana.includes(d.v)} onChange={() => toggleDia(d.v)} style={{ width: 'auto' }} />
+                  {d.label}
+                </label>
+              ))}
+            </div>
+            {error && <div style={{ fontSize: 12, color: 'var(--rojo-urgente)', marginBottom: 12 }}>{error}</div>}
+          </>
         )}
         {tipoFrecuencia === 'mensual' && (
           <div style={{ marginBottom: 12 }}>
             <label style={{ fontSize: 13, fontWeight: 600 }}>Día del mes</label>
             <input type="number" min={1} max={31} value={diaMes} onChange={e => setDiaMes(e.target.value)} style={{ marginTop: 4 }} />
+          </div>
+        )}
+        {tipoFrecuencia === 'mensual_dia_semana' && (
+          <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>Cuál</label>
+              <select value={posicionMensual} onChange={e => setPosicionMensual(Number(e.target.value))} style={{ marginTop: 4 }}>
+                {POSICIONES.map(p => <option key={p.v} value={p.v}>{p.label}</option>)}
+              </select>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>Día</label>
+              <select value={diaSemanaMensual} onChange={e => setDiaSemanaMensual(Number(e.target.value))} style={{ marginTop: 4 }}>
+                {DIAS_SEMANA.map(d => <option key={d.v} value={d.v}>{d.label}</option>)}
+              </select>
+            </div>
           </div>
         )}
 
