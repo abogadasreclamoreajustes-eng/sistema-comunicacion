@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { supabase } from './lib/supabase'
-import { getUsuarios, getConversaciones, getUnreadCounts, generarTareasRecurrentesPendientes } from './lib/api'
+import { getUsuarios, getConversaciones, getUnreadCounts, restaurarSesion, logout as logoutApi } from './lib/api'
 import { requestNotificationPermission, notify } from './lib/notifications'
 import Login from './components/Login'
 import Sidebar from './components/Sidebar'
@@ -9,12 +9,9 @@ import TasksView from './components/TasksView'
 import RecurrentesView from './components/RecurrentesView'
 import NewConversationModal from './components/NewConversationModal'
 
-const STORAGE_KEY = 'ba_comunicacion_user'
-
 export default function App() {
-  const [user, setUser] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) } catch { return null }
-  })
+  const [user, setUser] = useState(null)
+  const [bootLoading, setBootLoading] = useState(true)
   const [usuarios, setUsuarios] = useState([])
   const [conversaciones, setConversaciones] = useState([])
   const [conversacionesEquipo, setConversacionesEquipo] = useState([])
@@ -29,20 +26,29 @@ export default function App() {
   const convosRef = useRef([])
   useEffect(() => { convosRef.current = conversaciones }, [conversaciones])
 
+  // La sesión ya no se guarda a mano: la maneja Supabase Auth sola (persiste entre visitas).
+  // Al abrir la app solo hay que preguntarle si hay una sesión vigente y traer el perfil.
+  useEffect(() => {
+    let activo = true
+    restaurarSesion().then(u => { if (activo) { setUser(u); setBootLoading(false) } })
+    return () => { activo = false }
+  }, [])
+
   function handleLogin(u) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(u))
     setUser(u)
   }
   function handleLogout() {
-    localStorage.removeItem(STORAGE_KEY)
-    setUser(null)
+    logoutApi().then(() => setUser(null))
   }
 
   useEffect(() => {
     if (!user) return
     getUsuarios().then(setUsuarios).catch(() => {})
     requestNotificationPermission()
-    generarTareasRecurrentesPendientes().then(() => setRefreshTick(t => t + 1)).catch(() => {})
+    // La generación de tareas recurrentes ahora corre sola por cron en el servidor
+    // (app_generar_tareas_recurrentes, todos los días a las 09:00 UTC) — ya no depende de que
+    // alguien tenga la app abierta, y evita que una sesión tenga que insertar tareas "a nombre"
+    // de otra persona (rompía con los permisos reales de la base).
   }, [user])
 
   // Badge de no leídos en el título de la pestaña
@@ -118,6 +124,7 @@ export default function App() {
     return () => { supabase.removeChannel(channel) }
   }, [user])
 
+  if (bootLoading) return null
   if (!user) return <Login onLogin={handleLogin} />
 
   const activeConv = conversaciones.find(c => c.id === activeConvId) || conversacionesEquipo.find(c => c.id === activeConvId) || null

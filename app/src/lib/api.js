@@ -45,14 +45,42 @@ export function fmtFechaCorta(s) {
 }
 
 // ─── Auth ────────────────────────────────────────────────
+// Login real de Supabase Auth (antes era una tabla propia comparando contraseña en texto plano
+// con una función RPC — sin sesión real, las políticas de seguridad de la base no podían saber
+// quién preguntaba, así que quedaban abiertas). Con esto, cada pedido a la base va firmado con la
+// sesión de quien entró, y las políticas (RLS) pueden exigir que coincida.
+async function cargarPerfilYValidar(email) {
+  const { data, error } = await supabase.from('usuarios_public')
+    .select('id,nombre,email,rol,color,activo').eq('email', email.toLowerCase().trim()).maybeSingle()
+  if (error || !data || data.activo !== 'SI') {
+    await supabase.auth.signOut()
+    return null
+  }
+  return { id: data.id, nombre: data.nombre, email: data.email, rol: data.rol, color: data.color }
+}
+
 export async function login(email, password) {
-  const { data, error } = await supabase.rpc('login_usuario', {
-    p_email: email.toLowerCase().trim(),
-    p_password: password
-  })
-  if (error) return { ok: false, error: error.message }
-  if (!data || !data.ok) return { ok: false, error: (data && data.error) || 'No se pudo iniciar sesión.' }
-  return data
+  const { error } = await supabase.auth.signInWithPassword({ email: email.toLowerCase().trim(), password })
+  if (error) {
+    const msg = /invalid/i.test(error.message) ? 'Email o contraseña incorrectos.' : error.message
+    return { ok: false, error: msg }
+  }
+  const perfil = await cargarPerfilYValidar(email)
+  if (!perfil) return { ok: false, error: 'No se encontró tu perfil o tu usuario está desactivado. Contactá a Brenda o Evelyn.' }
+  return { ok: true, user: perfil }
+}
+
+// Se llama al abrir la app: si hay una sesión de Supabase vigente (persiste sola entre visitas),
+// recupera el perfil; si no hay sesión, o el perfil ya no existe/está desactivado, devuelve null.
+export async function restaurarSesion() {
+  const { data } = await supabase.auth.getSession()
+  const email = data?.session?.user?.email
+  if (!email) return null
+  return await cargarPerfilYValidar(email)
+}
+
+export async function logout() {
+  await supabase.auth.signOut()
 }
 
 // ─── Usuarios ────────────────────────────────────────────
@@ -310,44 +338,12 @@ export async function marcarComentariosLeidos(tareaId, userEmail) {
 function fmtDDMMYYYY(d) {
   return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`
 }
-function fmtISODate(d) {
-  return d.toISOString().substring(0, 10)
-}
 
 // "YYYY-MM-DD" (de un <input type=date>) parseado en hora LOCAL, no UTC — new Date(str) con ese
 // formato lo toma como UTC medianoche y en timezones negativos (Argentina) resta un día.
 function parseLocalDateInput(s) {
   const [y, m, d] = s.split('-').map(Number)
   return new Date(y, m - 1, d)
-}
-
-function calcularProximaFecha(tipoFrecuencia, frecuenciaConfig, desde) {
-  const d = new Date(desde)
-  d.setHours(0, 0, 0, 0)
-  if (tipoFrecuencia === 'diaria') {
-    d.setDate(d.getDate() + 1)
-    return d
-  }
-  if (tipoFrecuencia === 'semanal') {
-    const dias = (frecuenciaConfig?.diasSemana || []).slice().sort((a, b) => a - b)
-    if (dias.length === 0) { d.setDate(d.getDate() + 7); return d }
-    for (let i = 1; i <= 7; i++) {
-      const cand = new Date(d)
-      cand.setDate(cand.getDate() + i)
-      if (dias.includes(cand.getDay())) return cand
-    }
-    d.setDate(d.getDate() + 7)
-    return d
-  }
-  if (tipoFrecuencia === 'mensual') {
-    const diaMes = frecuenciaConfig?.diaMes || d.getDate()
-    const next = new Date(d.getFullYear(), d.getMonth() + 1, 1)
-    const ultimoDiaMes = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()
-    next.setDate(Math.min(diaMes, ultimoDiaMes))
-    return next
-  }
-  d.setDate(d.getDate() + 1)
-  return d
 }
 
 export async function getTareasRecurrentes(userEmail, modo, esSocia) {
@@ -396,43 +392,8 @@ export async function eliminarTareaRecurrente(id) {
   if (error) throw error
 }
 
-// Revisa las plantillas activas vencidas y genera las tareas del día. Se llama al cargar la
-// app (no hay cron/servidor propio); es seguro que corra desde varias sesiones a la vez porque
-// chequea ultima_generacion antes de generar cada una.
-export async function generarTareasRecurrentesPendientes() {
-  const { data, error } = await supabase.from('tareas_recurrentes').select('*').eq('activa', 'SI')
-  if (error) throw error
-  const hoy = new Date()
-  hoy.setHours(0, 0, 0, 0)
-  const hoyISO = fmtISODate(hoy)
-  for (const t of data) {
-    if (t.ultima_generacion === hoyISO) continue
-    const proxima = parseFlexibleDate(t.proxima_fecha)
-    if (!proxima || proxima.getTime() > hoy.getTime()) continue
-    if (t.fecha_fin && parseFlexibleDate(t.fecha_fin) && parseFlexibleDate(t.fecha_fin).getTime() < hoy.getTime()) {
-      await actualizarTareaRecurrente(t.id, { activa: 'NO' })
-      continue
-    }
-
-    // Varias pestañas/computadoras pueden correr esto a la vez: "reclamamos" la generación de
-    // hoy con un UPDATE condicional (atómico en Postgres). Si otra sesión ya lo reclamó primero,
-    // este UPDATE no afecta ninguna fila y no generamos la tarea duplicada.
-    const { data: claimed, error: claimErr } = await supabase.from('tareas_recurrentes')
-      .update({ ultima_generacion: hoyISO })
-      .eq('id', t.id)
-      .or(`ultima_generacion.is.null,ultima_generacion.neq.${hoyISO}`)
-      .select('id')
-    if (claimErr) throw claimErr
-    if (!claimed || claimed.length === 0) continue
-
-    await crearTarea({
-      titulo: t.titulo, descripcion: t.descripcion, asignadoPor: t.asignado_por, asignadoA: t.asignado_a,
-      fechaVenc: null, prioridad: t.prioridad,
-      notas: `Generada automáticamente desde tarea recurrente "${t.titulo}".`
-    })
-    let config = {}
-    try { config = JSON.parse(t.frecuencia_config || '{}') } catch {}
-    const proximaNueva = calcularProximaFecha(t.tipo_frecuencia, config, proxima)
-    await actualizarTareaRecurrente(t.id, { proxima_fecha: fmtDDMMYYYY(proximaNueva) })
-  }
-}
+// La generación de tareas desde las plantillas recurrentes ya no corre acá — ahora es un cron
+// del lado del servidor (app_generar_tareas_recurrentes, Postgres, todos los días 09:00 UTC).
+// Hacerlo desde el cliente requería que una sesión pudiera insertar tareas "a nombre" de otra
+// persona (el dueño original de la plantilla), lo cual ya no es posible con los permisos reales
+// de la base (antes la base estaba abierta y no importaba).
