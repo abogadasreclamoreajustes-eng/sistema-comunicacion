@@ -335,7 +335,7 @@ export async function marcarComentariosLeidos(tareaId, userEmail) {
 }
 
 // ─── Tareas recurrentes ──────────────────────────────────
-function fmtDDMMYYYY(d) {
+export function fmtDDMMYYYY(d) {
   return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`
 }
 
@@ -374,6 +374,41 @@ function primeraOcurrenciaMensualDiaSemana(weekday, posicion, desde) {
   return desde
 }
 
+// Próxima fecha (>= "desde") para cualquier tipo de frecuencia, dado su config. Se usa tanto al
+// crear una plantilla (primera ocurrencia) como al editarla (si cambia la frecuencia, hay que
+// recalcular cuándo cae la próxima). "cuatrimestral" comparte la lógica de "mensual" acá — el
+// intervalo real de 4 en 4 meses lo aplica el cron del servidor en cada generación siguiente, esto
+// solo ubica la primera/próxima ocurrencia por día del mes.
+export function calcularProximaFechaDesde(tipoFrecuencia, frecuenciaConfig, desde) {
+  const cfg = frecuenciaConfig || {}
+  if (tipoFrecuencia === 'diaria') return desde
+  if (tipoFrecuencia === 'semanal') {
+    const dias = cfg.diasSemana || []
+    if (dias.length === 0) return desde
+    for (let i = 0; i < 8; i++) {
+      const cand = new Date(desde.getFullYear(), desde.getMonth(), desde.getDate() + i)
+      if (dias.includes(cand.getDay())) return cand
+    }
+    return desde
+  }
+  if (tipoFrecuencia === 'mensual' || tipoFrecuencia === 'cuatrimestral') {
+    const diaMes = Number(cfg.diaMes) || 1
+    let y = desde.getFullYear(), m = desde.getMonth()
+    for (let i = 0; i < 6; i++) {
+      const ultimoDelMes = new Date(y, m + 1, 0).getDate()
+      const cand = new Date(y, m, Math.min(diaMes, ultimoDelMes))
+      if (cand.getTime() >= new Date(desde.getFullYear(), desde.getMonth(), desde.getDate()).getTime()) return cand
+      m++
+      if (m > 11) { m = 0; y++ }
+    }
+    return desde
+  }
+  if (tipoFrecuencia === 'mensual_dia_semana') {
+    return primeraOcurrenciaMensualDiaSemana(cfg.diaSemana, cfg.posicion, desde)
+  }
+  return desde
+}
+
 export async function getTareasRecurrentes(userEmail, modo, esSocia) {
   const email = userEmail.toLowerCase().trim()
   const { data, error } = await supabase.from('tareas_recurrentes').select('*')
@@ -397,12 +432,9 @@ export async function crearTareaRecurrente({ titulo, descripcion, asignadoPor, a
   const id = newId()
   const now = new Date().toISOString()
   const inicio = fechaInicio ? parseLocalDateInput(fechaInicio) : new Date()
-  // Para "mensual por día de semana" (ej. "el último miércoles del mes") no tiene sentido pedirle
-  // a la persona que adivine la fecha exacta en el calendario — se calcula sola, la primera
-  // ocurrencia a partir de la fecha de inicio elegida.
-  const primeraFecha = tipoFrecuencia === 'mensual_dia_semana' && frecuenciaConfig
-    ? primeraOcurrenciaMensualDiaSemana(frecuenciaConfig.diaSemana, frecuenciaConfig.posicion, inicio)
-    : inicio
+  // La primera ocurrencia real se calcula sola a partir de la fecha de inicio elegida y la
+  // frecuencia (ej: si es "mensual, día 15" y arrancás un día 3, la primera cae el 15, no el 3).
+  const primeraFecha = calcularProximaFechaDesde(tipoFrecuencia, frecuenciaConfig, inicio)
   const { error } = await supabase.from('tareas_recurrentes').insert({
     id, titulo, descripcion: descripcion || '',
     asignado_por: asignadoPor.toLowerCase().trim(), asignado_a: asignadoA.toLowerCase().trim(),

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getTareasRecurrentes, crearTareaRecurrente, actualizarTareaRecurrente, eliminarTareaRecurrente, fmtFecha } from '../lib/api'
+import { getTareasRecurrentes, crearTareaRecurrente, actualizarTareaRecurrente, eliminarTareaRecurrente, calcularProximaFechaDesde, fmtDDMMYYYY, fmtFecha } from '../lib/api'
 
 const PRIORIDADES = ['Baja', 'Normal', 'Alta', 'Urgente']
 const DIAS_SEMANA = [
@@ -23,6 +23,10 @@ function describirFrecuencia(t) {
     const dia = t.frecuenciaConfigObj?.diaMes
     return dia ? `Mensual: día ${dia}` : 'Mensual'
   }
+  if (t.tipo_frecuencia === 'cuatrimestral') {
+    const dia = t.frecuenciaConfigObj?.diaMes
+    return dia ? `Cuatrimestral: día ${dia}, cada 4 meses` : 'Cuatrimestral (cada 4 meses)'
+  }
   if (t.tipo_frecuencia === 'mensual_dia_semana') {
     const { diaSemana, posicion } = t.frecuenciaConfigObj || {}
     return `Mensual: ${nombrePosicion(posicion)} ${nombreDia(diaSemana)} del mes`
@@ -35,6 +39,7 @@ export default function RecurrentesView({ user, usuarios, esSocia }) {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [editando, setEditando] = useState(null)
 
   async function load() {
     setLoading(true)
@@ -96,6 +101,9 @@ export default function RecurrentesView({ user, usuarios, esSocia }) {
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => setEditando(t)} className="btn-secondary" style={{ fontSize: 12, padding: '6px 10px' }}>
+                    Editar
+                  </button>
                   <button onClick={() => toggleActiva(t)} className="btn-secondary" style={{ fontSize: 12, padding: '6px 10px' }}>
                     {t.activaBool ? 'Pausar' : 'Reanudar'}
                   </button>
@@ -109,24 +117,39 @@ export default function RecurrentesView({ user, usuarios, esSocia }) {
         })}
       </div>
 
-      {showForm && <NewRecurrenteModal user={user} usuarios={usuarios} onClose={() => setShowForm(false)} onCreated={() => { setShowForm(false); load() }} />}
+      {showForm && (
+        <RecurrenteFormModal
+          mode="crear" user={user} usuarios={usuarios}
+          onClose={() => setShowForm(false)}
+          onSaved={() => { setShowForm(false); load() }}
+        />
+      )}
+      {editando && (
+        <RecurrenteFormModal
+          mode="editar" user={user} usuarios={usuarios} initial={editando}
+          onClose={() => setEditando(null)}
+          onSaved={() => { setEditando(null); load() }}
+        />
+      )}
     </div>
   )
 }
 
-function NewRecurrenteModal({ user, usuarios, onClose, onCreated }) {
-  const [titulo, setTitulo] = useState('')
-  const [descripcion, setDescripcion] = useState('')
-  const [asignadoA, setAsignadoA] = useState(user.email)
-  const [tipoFrecuencia, setTipoFrecuencia] = useState('semanal')
-  const [diasSemana, setDiasSemana] = useState([])
-  const [diaMes, setDiaMes] = useState(1)
-  const [diaSemanaMensual, setDiaSemanaMensual] = useState(3)
-  const [posicionMensual, setPosicionMensual] = useState(-1)
+function RecurrenteFormModal({ mode, user, usuarios, initial, onClose, onSaved }) {
+  const cfgInicial = initial?.frecuenciaConfigObj || {}
+  const [titulo, setTitulo] = useState(initial?.titulo || '')
+  const [descripcion, setDescripcion] = useState(initial?.descripcion || '')
+  const [asignadoA, setAsignadoA] = useState(initial?.asignado_a || user.email)
+  const [tipoFrecuencia, setTipoFrecuencia] = useState(initial?.tipo_frecuencia || 'semanal')
+  const [diasSemana, setDiasSemana] = useState(cfgInicial.diasSemana || [])
+  const [diaMes, setDiaMes] = useState(cfgInicial.diaMes || 1)
+  const [diaSemanaMensual, setDiaSemanaMensual] = useState(cfgInicial.diaSemana ?? 3)
+  const [posicionMensual, setPosicionMensual] = useState(cfgInicial.posicion ?? -1)
   const [fechaInicio, setFechaInicio] = useState(new Date().toISOString().substring(0, 10))
-  const [fechaFin, setFechaFin] = useState('')
-  const [prioridad, setPrioridad] = useState('Normal')
+  const [fechaFin, setFechaFin] = useState(initial?.fecha_fin || '')
+  const [prioridad, setPrioridad] = useState(initial?.prioridad || 'Normal')
   const [error, setError] = useState('')
+  const [guardando, setGuardando] = useState(false)
 
   function toggleDia(v) {
     setDiasSemana(d => d.includes(v) ? d.filter(x => x !== v) : [...d, v].sort())
@@ -135,26 +158,48 @@ function NewRecurrenteModal({ user, usuarios, onClose, onCreated }) {
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
-    if (!titulo.trim()) return
+    if (!titulo.trim() || guardando) return
     if (tipoFrecuencia === 'semanal' && diasSemana.length === 0) {
       setError('Elegí al menos un día de la semana.')
       return
     }
     const frecuenciaConfig = tipoFrecuencia === 'semanal' ? { diasSemana }
-      : tipoFrecuencia === 'mensual' ? { diaMes: Number(diaMes) }
+      : (tipoFrecuencia === 'mensual' || tipoFrecuencia === 'cuatrimestral') ? { diaMes: Number(diaMes) }
       : tipoFrecuencia === 'mensual_dia_semana' ? { diaSemana: diaSemanaMensual, posicion: posicionMensual }
       : {}
-    await crearTareaRecurrente({
-      titulo: titulo.trim(), descripcion, asignadoPor: user.email, asignadoA,
-      fechaInicio, fechaFin: fechaFin || null, tipoFrecuencia, frecuenciaConfig, prioridad
-    })
-    onCreated()
+    setGuardando(true)
+    try {
+      if (mode === 'crear') {
+        await crearTareaRecurrente({
+          titulo: titulo.trim(), descripcion, asignadoPor: user.email, asignadoA,
+          fechaInicio, fechaFin: fechaFin || null, tipoFrecuencia, frecuenciaConfig, prioridad
+        })
+      } else {
+        // Si cambió la frecuencia o su configuración, recalculamos desde hoy cuándo cae la
+        // próxima ocurrencia. Si no cambió nada de eso, dejamos la próxima fecha como estaba
+        // (no tiene sentido correrla solo por editar el título, por ejemplo).
+        const cambioFrecuencia = tipoFrecuencia !== initial.tipo_frecuencia
+          || JSON.stringify(frecuenciaConfig) !== JSON.stringify(cfgInicial)
+        const campos = {
+          titulo: titulo.trim(), descripcion, asignado_a: asignadoA,
+          fecha_fin: fechaFin || null, tipo_frecuencia: tipoFrecuencia,
+          frecuencia_config: JSON.stringify(frecuenciaConfig), prioridad
+        }
+        if (cambioFrecuencia) {
+          campos.proxima_fecha = fmtDDMMYYYY(calcularProximaFechaDesde(tipoFrecuencia, frecuenciaConfig, new Date()))
+        }
+        await actualizarTareaRecurrente(initial.id, campos)
+      }
+      onSaved()
+    } finally {
+      setGuardando(false)
+    }
   }
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(46,31,82,.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
       <form onSubmit={handleSubmit} className="card" style={{ width: 460, padding: 28, maxHeight: '90vh', overflowY: 'auto' }}>
-        <h2 style={{ fontSize: 17, fontWeight: 800, marginTop: 0 }}>Nueva tarea recurrente</h2>
+        <h2 style={{ fontSize: 17, fontWeight: 800, marginTop: 0 }}>{mode === 'crear' ? 'Nueva tarea recurrente' : 'Editar tarea recurrente'}</h2>
         <label style={{ fontSize: 13, fontWeight: 600 }}>Título</label>
         <input value={titulo} onChange={e => setTitulo(e.target.value)} required style={{ marginBottom: 12, marginTop: 4 }} />
         <label style={{ fontSize: 13, fontWeight: 600 }}>Descripción</label>
@@ -170,6 +215,7 @@ function NewRecurrenteModal({ user, usuarios, onClose, onCreated }) {
           <option value="semanal">Semanal (ej: todos los miércoles)</option>
           <option value="mensual">Mensual — por día del mes (ej: día 15)</option>
           <option value="mensual_dia_semana">Mensual — por día de semana (ej: último miércoles)</option>
+          <option value="cuatrimestral">Cuatrimestral — cada 4 meses, por día del mes</option>
         </select>
 
         {tipoFrecuencia === 'semanal' && (
@@ -189,10 +235,15 @@ function NewRecurrenteModal({ user, usuarios, onClose, onCreated }) {
             {error && <div style={{ fontSize: 12, color: 'var(--rojo-urgente)', marginBottom: 12 }}>{error}</div>}
           </>
         )}
-        {tipoFrecuencia === 'mensual' && (
+        {(tipoFrecuencia === 'mensual' || tipoFrecuencia === 'cuatrimestral') && (
           <div style={{ marginBottom: 12 }}>
             <label style={{ fontSize: 13, fontWeight: 600 }}>Día del mes</label>
             <input type="number" min={1} max={31} value={diaMes} onChange={e => setDiaMes(e.target.value)} style={{ marginTop: 4 }} />
+            {tipoFrecuencia === 'cuatrimestral' && (
+              <div style={{ fontSize: 11, color: 'var(--gris-texto)', marginTop: 4 }}>
+                Se repite cada 4 meses (ej: enero, mayo, septiembre) en ese día.
+              </div>
+            )}
           </div>
         )}
         {tipoFrecuencia === 'mensual_dia_semana' && (
@@ -213,10 +264,12 @@ function NewRecurrenteModal({ user, usuarios, onClose, onCreated }) {
         )}
 
         <div style={{ display: 'flex', gap: 12 }}>
-          <div style={{ flex: 1 }}>
-            <label style={{ fontSize: 13, fontWeight: 600 }}>Empieza</label>
-            <input type="date" value={fechaInicio} onChange={e => setFechaInicio(e.target.value)} style={{ marginTop: 4 }} />
-          </div>
+          {mode === 'crear' && (
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>Empieza</label>
+              <input type="date" value={fechaInicio} onChange={e => setFechaInicio(e.target.value)} style={{ marginTop: 4 }} />
+            </div>
+          )}
           <div style={{ flex: 1 }}>
             <label style={{ fontSize: 13, fontWeight: 600 }}>Termina (opcional)</label>
             <input type="date" value={fechaFin} onChange={e => setFechaFin(e.target.value)} style={{ marginTop: 4 }} />
@@ -230,8 +283,10 @@ function NewRecurrenteModal({ user, usuarios, onClose, onCreated }) {
         </div>
 
         <div style={{ display: 'flex', gap: 10, marginTop: 22, justifyContent: 'flex-end' }}>
-          <button type="button" onClick={onClose} className="btn-secondary">Cancelar</button>
-          <button type="submit" className="btn-primary">Crear</button>
+          <button type="button" onClick={onClose} className="btn-secondary" disabled={guardando}>Cancelar</button>
+          <button type="submit" className="btn-primary" disabled={guardando}>
+            {guardando ? 'Guardando…' : (mode === 'crear' ? 'Crear' : 'Guardar cambios')}
+          </button>
         </div>
       </form>
     </div>
