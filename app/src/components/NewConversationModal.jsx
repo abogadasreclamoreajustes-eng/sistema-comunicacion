@@ -6,12 +6,18 @@ export default function NewConversationModal({ user, usuarios, onClose, onCreate
   const [participante, setParticipante] = useState(otros[0]?.email || '')
   const [nombreConv, setNombreConv] = useState('')
   const [mensaje, setMensaje] = useState('')
+  const [creando, setCreando] = useState(false)
 
   async function handleSubmit(e) {
     e.preventDefault()
-    if (!nombreConv.trim() || !participante) return
-    const res = await crearConversacion(user.email, participante, nombreConv.trim(), mensaje, user.email)
-    onCreated(res.id)
+    if (!nombreConv.trim() || !participante || creando) return
+    setCreando(true)
+    try {
+      const res = await crearConversacion(user.email, participante, nombreConv.trim(), mensaje, user.email)
+      onCreated(res.id)
+    } finally {
+      setCreando(false)
+    }
   }
 
   return (
@@ -28,8 +34,8 @@ export default function NewConversationModal({ user, usuarios, onClose, onCreate
         <label style={{ fontSize: 13, fontWeight: 600 }}>Primer mensaje (opcional)</label>
         <textarea value={mensaje} onChange={e => setMensaje(e.target.value)} rows={3} style={{ marginTop: 4, resize: 'vertical' }} />
         <div style={{ display: 'flex', gap: 10, marginTop: 22, justifyContent: 'flex-end' }}>
-          <button type="button" onClick={onClose} className="btn-secondary">Cancelar</button>
-          <button type="submit" className="btn-primary">Crear</button>
+          <button type="button" onClick={onClose} className="btn-secondary" disabled={creando}>Cancelar</button>
+          <button type="submit" className="btn-primary" disabled={creando}>{creando ? 'Creando…' : 'Crear'}</button>
         </div>
       </form>
     </div>
